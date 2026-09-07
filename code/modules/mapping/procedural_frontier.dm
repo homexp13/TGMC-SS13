@@ -141,7 +141,7 @@
 
 	generate_terrain(layout, cave_area, landing_area, seed)
 	carve_landing_exit(layout, cave_area)
-	var/list/open_cave_tiles = collect_open_cave_tiles(layout, landing_area)
+	var/list/open_cave_tiles = retain_reachable_cave_tiles(layout, cave_area, landing_area)
 	place_weed_nodes(open_cave_tiles)
 	place_xeno_tunnels(open_cave_tiles, layout)
 	place_platinum_landmarks(open_cave_tiles)
@@ -237,14 +237,45 @@
 		if(exit_turf)
 			set_turf_and_area(exit_turf, /turf/open/floor/plating/ground/mars/random/cave, cave_area)
 
-/obj/effect/landmark/procedural_frontier_generator/proc/collect_open_cave_tiles(datum/procedural_frontier_layout/layout, area/landing_area)
-	var/list/open_cave_tiles = list()
+/obj/effect/landmark/procedural_frontier_generator/proc/retain_reachable_cave_tiles(datum/procedural_frontier_layout/layout, area/cave_area, area/landing_area)
+	// Flood-fill starts inside the LZ. Any open cave tile which cannot be reached
+	// cardinally from it is sealed back into rock before landmarks are placed.
+	var/turf/landing_center = layout.get_landing_center()
+	if(!landing_center)
+		return list()
+	var/list/reachable_tiles = list()
+	var/list/visited = list()
+	var/list/queue = list(landing_center)
+	var/queue_index = 1
+	while(queue_index <= length(queue))
+		var/turf/current_turf = queue[queue_index++]
+		var/current_key = "[current_turf.x],[current_turf.y]"
+		if(visited[current_key])
+			continue
+		visited[current_key] = TRUE
+		if(!istype(current_turf, /turf/open))
+			continue
+		for(var/direction in GLOB.cardinals)
+			var/turf/neighbor = get_step(current_turf, direction)
+			if(!neighbor)
+				continue
+			if(neighbor.x <= layout.map_min_x || neighbor.x >= layout.map_max_x || neighbor.y <= layout.map_min_y || neighbor.y >= layout.map_max_y)
+				continue
+			var/neighbor_key = "[neighbor.x],[neighbor.y]"
+			if(!visited[neighbor_key] && istype(neighbor, /turf/open))
+				queue += neighbor
+
 	for(var/tile_x in layout.map_min_x + 1 to layout.map_max_x - 1)
 		for(var/tile_y in layout.map_min_y + 1 to layout.map_max_y - 1)
 			var/turf/cave_turf = locate(tile_x, tile_y, layout.z_level)
-			if(cave_turf && istype(cave_turf, /turf/open) && cave_turf.loc != landing_area)
-				open_cave_tiles += cave_turf
-	return open_cave_tiles
+			if(!cave_turf || layout.is_landing(tile_x, tile_y))
+				continue
+			var/cave_key = "[tile_x],[tile_y]"
+			if(istype(cave_turf, /turf/open) && visited[cave_key])
+				reachable_tiles += cave_turf
+			else if(istype(cave_turf, /turf/open))
+				set_turf_and_area(cave_turf, /turf/closed/mineral/smooth/bigred, cave_area)
+	return reachable_tiles
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_weed_nodes(list/open_cave_tiles)
 	for(var/turf/cave_turf in open_cave_tiles)

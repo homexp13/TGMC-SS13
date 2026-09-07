@@ -38,7 +38,10 @@ near separate map corners, platinum landmarks are distributed in caves, and
 xenomorph start landmarks remain on ground cave tiles only.
 
 The implementation is split into `create_layout`, `generate_terrain`,
-`carve_landing_exit`, `collect_open_cave_tiles`, and landmark-placement procs.
+`carve_landing_exit`, `retain_reachable_cave_tiles`, and landmark-placement
+procs. The reachability stage flood-fills from the LZ and seals every isolated
+open pocket before placing landmarks, so unreachable cave chunks cannot get
+tunnels or spawns.
 The shared `procedural_frontier_layout` datum contains all derived coordinates
 for one run, so additional biomes or structures can consume the same map
 geometry without duplicating boundary and landing calculations.
