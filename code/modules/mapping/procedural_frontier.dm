@@ -111,6 +111,11 @@
 	var/remote_cave_cutoff = 0.82
 	var/cave_ridge_threshold = 0.0
 	var/central_landing_complexity = 0.18
+	// A hard ridge check selects solid material eligible for deep walls. The
+	// separate wall-distance test below ensures these are not cave boundaries.
+	var/hard_ridge_cutoff = 0.35
+	var/deep_wall_separation = 2
+	var/deep_cave_wall_type = /turf/closed/wall/r_wall
 
 	// Noise settings. Expose both layers to make biome-specific generators easy.
 	var/noise_coarse_scale = 16
@@ -141,6 +146,7 @@
 
 	generate_terrain(layout, cave_area, landing_area, seed)
 	carve_landing_exit(layout, cave_area)
+	place_deep_walls(layout, cave_area, seed)
 	var/list/open_cave_tiles = retain_reachable_cave_tiles(layout, cave_area, landing_area)
 	place_weed_nodes(open_cave_tiles)
 	place_xeno_tunnels(open_cave_tiles, layout)
@@ -236,6 +242,29 @@
 		var/turf/exit_turf = locate(exit_x, exit_y, layout.z_level)
 		if(exit_turf)
 			set_turf_and_area(exit_turf, /turf/open/floor/plating/ground/mars/random/cave, cave_area)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_deep_walls(datum/procedural_frontier_layout/layout, area/cave_area, seed)
+	// Deep walls are based on separation from open cave tiles, never on LZ
+	// distance. This keeps r_walls in the interior of thick rock masses.
+	for(var/tile_x in layout.map_min_x + 1 to layout.map_max_x - 1)
+		for(var/tile_y in layout.map_min_y + 1 to layout.map_max_y - 1)
+			var/turf/rock_turf = locate(tile_x, tile_y, layout.z_level)
+			if(!rock_turf || !istype(rock_turf, /turf/closed/mineral/smooth/bigred))
+				continue
+			var/ridge_value = procedural_frontier_ridge_noise(tile_x, tile_y, seed, noise_coarse_scale, noise_fine_scale, noise_coarse_weight)
+			if(ridge_value > hard_ridge_cutoff || !is_deep_inside_rock(rock_turf, layout))
+				continue
+			set_turf_and_area(rock_turf, deep_cave_wall_type, cave_area)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/is_deep_inside_rock(turf/rock_turf, datum/procedural_frontier_layout/layout)
+	for(var/offset_x in -deep_wall_separation to deep_wall_separation)
+		for(var/offset_y in -deep_wall_separation to deep_wall_separation)
+			if(!offset_x && !offset_y)
+				continue
+			var/turf/neighbor = locate(rock_turf.x + offset_x, rock_turf.y + offset_y, layout.z_level)
+			if(!neighbor || istype(neighbor, /turf/open))
+				return FALSE
+	return TRUE
 
 /obj/effect/landmark/procedural_frontier_generator/proc/retain_reachable_cave_tiles(datum/procedural_frontier_layout/layout, area/cave_area, area/landing_area)
 	// Flood-fill starts inside the LZ. Any open cave tile which cannot be reached

@@ -21,6 +21,10 @@ The configurable variables on
 * `cave_ridge_threshold` — base ridge-noise cutoff.
 * `central_landing_complexity` — extra cutoff for a central pad; it fades out
   toward map edges, so edge pads produce more open caves.
+* `hard_ridge_cutoff` / `deep_wall_separation` / `deep_cave_wall_type` — the
+  hard ridge test selects candidate solid tiles, then only tiles separated
+  from open cave by the configured radius become deep-rock (`r_wall` for
+  testing). This is independent of LZ distance.
 * `noise_coarse_scale` / `noise_fine_scale` / `noise_coarse_weight` — the two
   value-noise layers and their blend.
 * `weed_node_spacing`, `tunnel_edge_offset`, `tunnel_minimum_spacing`,
