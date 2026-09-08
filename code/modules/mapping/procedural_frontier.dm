@@ -114,8 +114,8 @@
 	var/map_height = 199
 
 	// Landing zone geometry and placement.
-	var/landing_width = 20
-	var/landing_height = 30
+	var/landing_width = 30
+	var/landing_height = 40
 	var/landing_edge_margin = 8
 	var/landing_exit_length = 18
 	var/pad_width = 11
@@ -165,6 +165,7 @@
 	generate_terrain(layout, cave_area, landing_area, seed)
 	carve_landing_exit(layout, cave_area, landing_area)
 	place_landing_docking_port(layout)
+	place_landing_equipment(layout, landing_area)
 	place_deep_walls(layout, cave_area, seed)
 	var/list/open_cave_tiles = retain_reachable_cave_tiles(layout, cave_area, landing_area)
 	place_weed_nodes(open_cave_tiles)
@@ -239,14 +240,14 @@
 				else if(layout.is_pad(tile_x, tile_y))
 					set_turf_and_area(current_turf, /turf/open/floor/plating, landing_area)
 				else
-					set_turf_and_area(current_turf, /turf/open/floor/plating/ground/mars, landing_area)
+					set_turf_and_area(current_turf, /turf/open/floor/asteroidfloor, landing_area)
 				continue
 			if(layout.is_border(tile_x, tile_y))
 				set_turf_and_area(current_turf, /turf/closed/mineral/smooth/bigred/indestructible, cave_area)
 				continue
 			var/distance_from_landing = landing_center ? get_dist(current_turf, landing_center) : 0
 			if(distance_from_landing <= landing_surface_radius)
-				set_turf_and_area(current_turf, /turf/open/floor/plating/ground/mars/random/dirt, cave_area)
+				set_turf_and_area(current_turf, /turf/open/floor/asteroidfloor, cave_area)
 				continue
 			var/ridge_cutoff = get_ridge_cutoff(distance_from_landing, layout, central_complexity_multiplier)
 			var/ridge_value = procedural_frontier_ridge_noise(tile_x, tile_y, seed, noise_coarse_scale, noise_fine_scale, noise_coarse_weight)
@@ -271,7 +272,7 @@
 			for(var/exit_y = layout.landing_min_y - 1, exit_y >= max(layout.map_min_y + 1, layout.landing_min_y - landing_exit_length), exit_y--)
 				var/turf/exit_turf = locate(exit_x, exit_y, layout.z_level)
 				if(exit_turf)
-					set_turf_and_area(exit_turf, /turf/open/floor/plating/ground/mars/random/cave, cave_area)
+					set_turf_and_area(exit_turf, /turf/open/floor/asteroidfloor, cave_area)
 	// Remove the two three-tile sections from the south wall after carving.
 	for(var/exit_center_x in exit_centers)
 		for(var/exit_x in exit_center_x - 1 to exit_center_x + 1)
@@ -288,6 +289,54 @@
 	var/turf/button_turf = locate(layout.landing_min_x + 1, layout.landing_center_y, layout.z_level)
 	if(button_turf)
 		new /obj/machinery/button/door/open_only/landing_zone(button_turf)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_landing_equipment(datum/procedural_frontier_layout/layout, area/landing_area)
+	// APC is mounted on the inside of the north wall and the four landing
+	// floodlights occupy the corners of the clear pad perimeter.
+	var/turf/apc_turf = locate(layout.landing_center_x, layout.landing_max_y - 1, layout.z_level)
+	if(apc_turf)
+		new /obj/machinery/power/apc(apc_turf)
+	var/list/light_positions = list(
+		list(layout.landing_min_x + 1, layout.landing_min_y + 1),
+		list(layout.landing_max_x - 1, layout.landing_min_y + 1),
+		list(layout.landing_min_x + 1, layout.landing_max_y - 1),
+		list(layout.landing_max_x - 1, layout.landing_max_y - 1),
+	)
+	for(var/list/light_position in light_positions)
+		var/turf/light_turf = locate(light_position[1], light_position[2], layout.z_level)
+		if(light_turf)
+			new /obj/machinery/floodlight/landing(light_turf)
+	// Mark the pad with a stencil. Every tile covered by the dropship remains
+	// clean plating; do not replace it with warning overlays.
+	for(var/tile_x in layout.pad_min_x to layout.pad_max_x)
+		for(var/tile_y in layout.pad_min_y to layout.pad_max_y)
+			var/turf/pad_turf = locate(tile_x, tile_y, layout.z_level)
+			if(pad_turf)
+				set_turf_and_area(pad_turf, /turf/open/floor/plating, landing_area)
+	var/turf/stencil_turf = locate(layout.landing_center_x, layout.landing_center_y, layout.z_level)
+	if(stencil_turf)
+		new /obj/structure/prop/mainship/hangar_stencil(stencil_turf)
+	// Timed containment poddoors form a complete, gapless outer ring. The
+	// reinforced wall is the inner ring; poddoors are one tile behind it.
+	var/containment_min_x = layout.landing_min_x - 1
+	var/containment_max_x = layout.landing_max_x + 1
+	var/containment_min_y = layout.landing_min_y - 1
+	var/containment_max_y = layout.landing_max_y + 1
+	for(var/tile_x in containment_min_x to containment_max_x)
+		for(var/tile_y in containment_min_y to containment_max_y)
+			var/is_containment_ring = tile_x == containment_min_x || tile_x == containment_max_x || tile_y == containment_min_y || tile_y == containment_max_y
+			if(!is_containment_ring)
+				continue
+			var/turf/containment_turf = locate(tile_x, tile_y, layout.z_level)
+			if(containment_turf)
+				containment_turf = set_turf_and_area(containment_turf, /turf/open/floor/asteroidfloor, landing_area)
+				new /obj/machinery/door/poddoor/timed_late/containment/landing_zone(containment_turf)
+	// Barricades sit immediately inside each exit, not outside the LZ wall.
+	for(var/exit_center_x in list(layout.landing_min_x + 6, layout.landing_max_x - 6))
+		for(var/exit_x in exit_center_x - 1 to exit_center_x + 1)
+			var/turf/barricade_turf = locate(exit_x, layout.landing_min_y + 1, layout.z_level)
+			if(barricade_turf)
+				new /obj/structure/barricade/folding(barricade_turf)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_deep_walls(datum/procedural_frontier_layout/layout, area/cave_area, seed)
 	// Deep walls are based on separation from open cave tiles, never on LZ

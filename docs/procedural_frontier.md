@@ -5,22 +5,31 @@ is only a 199×199 turf shell and a generator landmark; the map contents are
 created when the round starts.
 
 There is no city generation. Every non-boundary tile belongs to the cave
-generator. A 20×30 landing zone is placed at a random valid location each
+generator. A 30×40 landing zone is placed at a random valid location each
 round and receives clear plating. It has a carved exit into the cave network.
 The map boundary is indestructible Big Red rock.
+
+The LZ has a reinforced perimeter, two three-tile southern exits, LZ1 docking
+port, a complete outer ring of containment poddoors, landing floodlights, an
+APC, a landing-zone button, a hangar stencil, and folding barricades just inside
+the exits. The 11×21 dropship footprint is entirely clean plating; the rest of
+the LZ uses asteroid floor.
 
 The configurable variables on
 `/obj/effect/landmark/procedural_frontier_generator` are:
 
 * `map_width` / `map_height` — currently 199 each. These must agree with the
   authored `.dmm` size.
-* `landing_width` / `landing_height` — currently 20×30.
+* `landing_width` / `landing_height` — currently 30×40.
+* `pad_width` / `pad_height` — the docking pad remains 11×21, matching the
+  marine dropship's stationary LZ1 port.
 * `landing_edge_margin` — minimum distance between the pad and map edge.
 * `landing_edge_opening` — exponential gradient rate (currently `4.0`).
 * `landing_surface_radius` — open terrain radius around the LZ (currently 24).
 * `cave_ridge_threshold` — base ridge-noise cutoff.
 * `central_landing_complexity` — extra cutoff for a central pad; it fades out
   toward map edges, so edge pads produce more open caves.
+* `excavation_site_count` — number of randomly distributed excavation sites.
 * `hard_ridge_cutoff` / `deep_wall_separation` / `deep_cave_wall_type` — the
   hard ridge test selects candidate solid tiles, then only tiles separated
   from open cave by the configured radius become deep-rock (`r_wall` for
