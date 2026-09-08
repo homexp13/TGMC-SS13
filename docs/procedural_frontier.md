@@ -10,8 +10,8 @@ round and receives clear plating. It has a carved exit into the cave network.
 The map boundary is indestructible Big Red rock.
 
 The LZ has a reinforced perimeter, two three-tile southern exits, LZ1 docking
-port, a complete outer ring of containment poddoors, landing floodlights, an
-APC, a landing-zone button, a hangar stencil, and folding barricades just inside
+port, a complete outer ring of containment poddoors, room lighting, an APC, a
+landing-zone button, a hangar stencil, and folding barricades just inside
 the exits. The 11×21 dropship footprint is entirely clean plating; the rest of
 the LZ uses asteroid floor.
 
@@ -37,7 +37,9 @@ The configurable variables on
 * `noise_coarse_scale` / `noise_fine_scale` / `noise_coarse_weight` — the two
   value-noise layers and their blend.
 * `weed_node_spacing`, `tunnel_edge_offset`, `tunnel_minimum_spacing`,
-  `miner_platinum_count`, and `xenomorph_spawn_count` — landmark placement.
+	`miner_phoron_count`, `miner_phoron_radius`, `miner_platinum_count`, and
+	`xenomorph_spawn_count` — landmark placement. Phoron miners are selected
+	from open tiles near the LZ; platinum miners are selected from all caves.
 
 `procedural_frontier_landing_threshold()` is the dedicated normalized
 exponential gradient function: it returns `0` at the landing zone and rises
@@ -58,3 +60,9 @@ tunnels or spawns.
 The shared `procedural_frontier_layout` datum contains all derived coordinates
 for one run, so additional biomes or structures can consume the same map
 geometry without duplicating boundary and landing calculations.
+
+The landing zone receives compact supply, medical, engineering, and weapon
+rooms, each with two lights and a free-access airlock. Their positions are
+seeded and vary along the LZ boundary from round to round. A toilet room is
+created with a one-percent chance. Miner placement uses separate near-LZ and
+remote-cave passes with a configurable minimum spacing.

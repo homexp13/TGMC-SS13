@@ -17,12 +17,26 @@
 /area/procedural_frontier/landing
 	name = "Landing Zone"
 	icon_state = "green"
+	outside = FALSE
+	always_unpowered = FALSE
 	minimap_color = MINIMAP_AREA_LZ
 
 /area/procedural_frontier/landing/lz1
 	name = "Landing Zone One"
 	icon_state = "away1"
+	outside = FALSE
+	ceiling = CEILING_NONE
+	always_unpowered = FALSE
 	area_flags = NONE
+
+// Directional cave sectors are represented by one runtime area type. Instances
+// are split by direction, depth band, and ceiling value during generation.
+/area/procedural_frontier/sector
+	name = "Frontier Caves"
+	icon_state = "red"
+	outside = FALSE
+	always_unpowered = TRUE
+	minimap_color = MINIMAP_AREA_CAVES
 
 // All coordinates derived for one map-generation run.
 /datum/procedural_frontier_layout
@@ -117,6 +131,7 @@
 	var/landing_width = 30
 	var/landing_height = 40
 	var/landing_edge_margin = 8
+	var/landing_edge_bias = 4
 	var/landing_exit_length = 18
 	var/pad_width = 11
 	var/pad_height = 21
@@ -125,6 +140,7 @@
 	// ridge cutoff rises according to the exponential gradient.
 	var/landing_surface_radius = 24
 	var/landing_edge_opening = 4.0
+	var/ceiling_distance_rate = 0.35
 	var/remote_cave_cutoff = 0.82
 	var/cave_ridge_threshold = 0.0
 	var/central_landing_complexity = 0.18
@@ -143,7 +159,23 @@
 	var/weed_node_spacing = 5
 	var/tunnel_edge_offset = 10
 	var/tunnel_minimum_spacing = 24
+	var/miner_phoron_count = 8
+	var/miner_phoron_radius = 48
 	var/miner_platinum_count = 16
+	var/miner_minimum_spacing = 10
+	var/supply_room_width = 6
+	var/supply_room_height = 6
+	var/medical_room_width = 7
+	var/medical_room_height = 7
+	var/engineering_room_width = 6
+	var/engineering_room_height = 6
+	var/weapon_room_width = 6
+	var/weapon_room_height = 6
+	var/toilet_room_width = 4
+	var/toilet_room_height = 4
+	var/toilet_room_chance = 1
+	var/lz_barrel_count = 4
+	var/lz_supplycrate_count = 3
 	var/xenomorph_spawn_count = 3
 	var/excavation_site_count = 20
 
@@ -165,12 +197,22 @@
 	generate_terrain(layout, cave_area, landing_area, seed)
 	carve_landing_exit(layout, cave_area, landing_area)
 	place_landing_docking_port(layout)
+	place_supply_room(layout, landing_area, seed)
+	place_medical_room(layout, landing_area, seed)
+	place_engineering_room(layout, landing_area, seed)
+	place_weapon_room(layout, landing_area, seed)
+	if(prob(toilet_room_chance))
+		place_toilet_room(layout, landing_area, seed)
 	place_landing_equipment(layout, landing_area)
+	place_landing_random_props(layout)
 	place_deep_walls(layout, cave_area, seed)
 	var/list/open_cave_tiles = retain_reachable_cave_tiles(layout, cave_area, landing_area)
+	assign_cave_areas(layout)
 	place_weed_nodes(open_cave_tiles)
 	place_xeno_tunnels(open_cave_tiles, layout)
-	place_platinum_landmarks(open_cave_tiles)
+	var/list/placed_miner_tiles = list()
+	place_platinum_miners(open_cave_tiles, layout, placed_miner_tiles)
+	place_phoron_miners(open_cave_tiles, layout, placed_miner_tiles)
 	place_xenomorph_spawns(open_cave_tiles)
 	place_excavation_sites(open_cave_tiles, layout)
 
@@ -191,8 +233,8 @@
 
 	var/available_x = max(1, map_width - landing_width - landing_edge_margin * 2)
 	var/available_y = max(1, map_height - landing_height - landing_edge_margin * 2)
-	layout.landing_min_x = layout.map_min_x + landing_edge_margin + round(procedural_frontier_hash(701, 17, seed) * available_x)
-	layout.landing_min_y = layout.map_min_y + landing_edge_margin + round(procedural_frontier_hash(719, 23, seed) * available_y)
+	layout.landing_min_x = layout.map_min_x + landing_edge_margin + get_edge_biased_offset(available_x, procedural_frontier_hash(701, 17, seed))
+	layout.landing_min_y = layout.map_min_y + landing_edge_margin + get_edge_biased_offset(available_y, procedural_frontier_hash(719, 23, seed))
 	layout.landing_max_x = layout.landing_min_x + landing_width - 1
 	layout.landing_max_y = layout.landing_min_y + landing_height - 1
 	layout.landing_center_x = round((layout.landing_min_x + layout.landing_max_x) / 2)
@@ -204,6 +246,13 @@
 	layout.max_landing_distance = get_farthest_edge_distance(layout)
 	layout.landing_edge_factor = get_landing_edge_factor(layout)
 	return layout
+
+/obj/effect/landmark/procedural_frontier_generator/proc/get_edge_biased_offset(range, random_value)
+	if(range <= 0)
+		return 0
+	var/edge_distance = (random_value < 0.5) ? (random_value * 2) : ((1 - random_value) * 2)
+	var/half_range = range / 2
+	return round(random_value < 0.5 ? (edge_distance ** landing_edge_bias) * half_range : range - (edge_distance ** landing_edge_bias) * half_range)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/get_farthest_edge_distance(datum/procedural_frontier_layout/layout)
 	var/turf/landing_center = layout.get_landing_center()
@@ -225,6 +274,79 @@
 	var/relative_x = abs(layout.landing_center_x - layout.map_center_x) / max(1, map_width / 2)
 	var/relative_y = abs(layout.landing_center_y - layout.map_center_y) / max(1, map_height / 2)
 	return clamp(max(relative_x, relative_y), 0, 1)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/get_ceiling_level(distance_from_landing, datum/procedural_frontier_layout/layout)
+	// Map the exponential distance profile onto all eight CEILING constants.
+	var/normalized_distance = procedural_frontier_landing_threshold(distance_from_landing, layout.max_landing_distance, ceiling_distance_rate)
+	return clamp(round(normalized_distance * CEILING_DEEP_UNDERGROUND_METAL), CEILING_NONE, CEILING_DEEP_UNDERGROUND_METAL)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/get_cave_area_color(ceiling_level)
+	// Keep shallow/outside areas light and progressively darken underground
+	// sectors. A neutral grayscale keeps the direction/depth names readable.
+	var/shade = clamp(220 - (ceiling_level * 24), 52, 220)
+	return rgb(shade, shade, shade)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/is_cave_area_outside(ceiling_level)
+	return ceiling_level <= CEILING_OBSTRUCTED
+
+/obj/effect/landmark/procedural_frontier_generator/proc/get_cave_depth_sector(distance_from_landing, datum/procedural_frontier_layout/layout)
+	// Use the same exponential curve as ceiling assignment. This aligns Near,
+	// Middle, and Far area bands with increasingly stronger ceiling types.
+	var/normalized_distance = procedural_frontier_landing_threshold(distance_from_landing, layout.max_landing_distance, ceiling_distance_rate)
+	return clamp(floor(normalized_distance * 3), 0, 2)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/get_cave_depth_sector_name(depth_sector)
+	switch(depth_sector)
+		if(0)
+			return "Near"
+		if(1)
+			return "Middle"
+	return "Far"
+
+/obj/effect/landmark/procedural_frontier_generator/proc/get_cave_sector(dx, dy)
+	if(!dx && !dy)
+		return "center"
+	var/absolute_x = abs(dx)
+	var/absolute_y = abs(dy)
+	// Keep cardinal sectors broad while reserving diagonal sectors for tiles
+	// where both axes contribute materially to the direction.
+	if(absolute_x > absolute_y * 2)
+		return dx > 0 ? "east" : "west"
+	if(absolute_y > absolute_x * 2)
+		return dy > 0 ? "north" : "south"
+	if(dx > 0)
+		return dy > 0 ? "northeast" : "southeast"
+	return dy > 0 ? "northwest" : "southwest"
+
+/obj/effect/landmark/procedural_frontier_generator/proc/assign_cave_areas(datum/procedural_frontier_layout/layout)
+	var/turf/landing_center = layout.get_landing_center()
+	if(!landing_center)
+		return
+	var/list/area_cache = list()
+	for(var/tile_x in layout.map_min_x to layout.map_max_x)
+		for(var/tile_y in layout.map_min_y to layout.map_max_y)
+			// Keep the LZ and its external containment ring in their dedicated
+			// area so NEAR_FOB and shutter handling remain intact.
+			if(tile_x >= layout.landing_min_x - 1 && tile_x <= layout.landing_max_x + 1 && tile_y >= layout.landing_min_y - 1 && tile_y <= layout.landing_max_y + 1)
+				continue
+			var/turf/current_turf = locate(tile_x, tile_y, layout.z_level)
+			if(!current_turf)
+				continue
+			var/sector = get_cave_sector(tile_x - landing_center.x, tile_y - landing_center.y)
+			var/distance_from_landing = get_dist_euclidean(current_turf, landing_center)
+			var/depth_sector = get_cave_depth_sector(distance_from_landing, layout)
+			var/depth_name = get_cave_depth_sector_name(depth_sector)
+			var/ceiling_level = get_ceiling_level(distance_from_landing, layout)
+			var/cache_key = "[sector]:[depth_sector]:[ceiling_level]"
+			var/area/target_area = area_cache[cache_key]
+			if(!target_area)
+				target_area = new /area/procedural_frontier/sector
+				target_area.ceiling = ceiling_level
+				target_area.outside = is_cave_area_outside(ceiling_level)
+				target_area.minimap_color = get_cave_area_color(ceiling_level)
+				target_area.name = "Frontier Caves - [capitalize(sector)] - [depth_name] (ceiling [ceiling_level])"
+				area_cache[cache_key] = target_area
+			current_turf.change_area(current_turf.loc, target_area)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/generate_terrain(datum/procedural_frontier_layout/layout, area/cave_area, area/landing_area, seed)
 	var/turf/landing_center = layout.get_landing_center()
@@ -291,21 +413,6 @@
 		new /obj/machinery/button/door/open_only/landing_zone(button_turf)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_landing_equipment(datum/procedural_frontier_layout/layout, area/landing_area)
-	// APC is mounted on the inside of the north wall and the four landing
-	// floodlights occupy the corners of the clear pad perimeter.
-	var/turf/apc_turf = locate(layout.landing_center_x, layout.landing_max_y - 1, layout.z_level)
-	if(apc_turf)
-		new /obj/machinery/power/apc(apc_turf)
-	var/list/light_positions = list(
-		list(layout.landing_min_x + 1, layout.landing_min_y + 1),
-		list(layout.landing_max_x - 1, layout.landing_min_y + 1),
-		list(layout.landing_min_x + 1, layout.landing_max_y - 1),
-		list(layout.landing_max_x - 1, layout.landing_max_y - 1),
-	)
-	for(var/list/light_position in light_positions)
-		var/turf/light_turf = locate(light_position[1], light_position[2], layout.z_level)
-		if(light_turf)
-			new /obj/machinery/floodlight/landing(light_turf)
 	// Mark the pad with a stencil. Every tile covered by the dropship remains
 	// clean plating; do not replace it with warning overlays.
 	for(var/tile_x in layout.pad_min_x to layout.pad_max_x)
@@ -337,6 +444,163 @@
 			var/turf/barricade_turf = locate(exit_x, layout.landing_min_y + 1, layout.z_level)
 			if(barricade_turf)
 				new /obj/structure/barricade/folding(barricade_turf)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_supply_room(datum/procedural_frontier_layout/layout, area/landing_area, seed)
+	var/room_min_x = layout.landing_min_x
+	var/room_min_y = get_room_edge_offset(layout.landing_min_y + 7, layout.landing_max_y - supply_room_height - 1, seed, 911)
+	var/room_max_x = room_min_x + supply_room_width - 1
+	var/room_max_y = room_min_y + supply_room_height - 1
+	for(var/tile_x in room_min_x to room_max_x)
+		for(var/tile_y in room_min_y to room_max_y)
+			var/turf/room_turf = locate(tile_x, tile_y, layout.z_level)
+			if(!room_turf)
+				continue
+			var/is_room_border = tile_x == room_min_x || tile_x == room_max_x || tile_y == room_min_y || tile_y == room_max_y
+			set_turf_and_area(room_turf, is_room_border ? /turf/closed/wall/r_wall : /turf/open/floor/wood, landing_area)
+	var/turf/console_turf = locate(room_min_x + 1, room_min_y + 1, layout.z_level)
+	if(console_turf)
+		new /obj/machinery/computer/supplycomp/crash(console_turf)
+	for(var/crate_type in list(/obj/structure/largecrate/guns/russian, /obj/structure/largecrate/guns/merc))
+		var/turf/crate_turf = locate(room_min_x + 2 + (crate_type == /obj/structure/largecrate/guns/merc), room_min_y + 3, layout.z_level)
+		if(crate_turf)
+			new crate_type(crate_turf)
+	for(var/i in 1 to 2)
+		var/turf/barrel_turf = locate(room_min_x + 2 + i, room_min_y + 2, layout.z_level)
+		if(barrel_turf)
+			new /obj/effect/spawner/random/misc/structure/barrel(barrel_turf)
+	var/turf/airlock_turf = locate(room_min_x + round(supply_room_width / 2), room_min_y, layout.z_level)
+	place_lz_room_airlock(airlock_turf, /turf/open/floor/wood, landing_area)
+	place_room_lights(layout, room_min_x, room_min_y, room_max_x, room_max_y)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_medical_room(datum/procedural_frontier_layout/layout, area/landing_area, seed)
+	var/room_min_x = layout.landing_max_x - medical_room_width + 1
+	var/room_min_y = get_room_edge_offset(layout.landing_min_y + 7, layout.landing_max_y - medical_room_height - 1, seed, 929)
+	var/room_max_x = room_min_x + medical_room_width - 1
+	var/room_max_y = room_min_y + medical_room_height - 1
+	build_lz_room(layout, landing_area, room_min_x, room_min_y, room_max_x, room_max_y, /turf/open/floor/mainship/metal/gray)
+	var/turf/table_turf = locate(round((room_min_x + room_max_x) / 2), round((room_min_y + room_max_y) / 2), layout.z_level)
+	if(table_turf)
+		new /obj/machinery/optable(table_turf)
+	var/turf/iv_turf = locate(room_min_x + 2, room_min_y + 2, layout.z_level)
+	if(iv_turf)
+		new /obj/machinery/iv_drip(iv_turf)
+	var/turf/printer_turf = locate(room_max_x - 1, room_min_y + 2, layout.z_level)
+	if(printer_turf)
+		new /obj/machinery/bioprinter/stocked(printer_turf)
+	var/turf/closet_turf = locate(room_min_x + 1, room_max_y - 1, layout.z_level)
+	if(closet_turf)
+		new /obj/structure/closet/secure_closet/medical2(closet_turf)
+	for(var/table_x in list(room_min_x + 2, room_max_x - 2))
+		var/turf/side_table_turf = locate(table_x, room_max_y - 2, layout.z_level)
+		if(side_table_turf)
+			new /obj/structure/table(side_table_turf)
+			new /obj/item/tank/anesthetic(side_table_turf)
+			new /obj/item/clothing/mask/breath/medical(side_table_turf)
+	place_lz_room_airlock(locate(room_min_x + round(medical_room_width / 2), room_min_y, layout.z_level), /turf/open/floor/mainship/metal/gray, landing_area)
+	place_room_lights(layout, room_min_x, room_min_y, room_max_x, room_max_y)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_engineering_room(datum/procedural_frontier_layout/layout, area/landing_area, seed)
+	var/room_min_x = get_room_edge_offset(layout.landing_min_x + 8, layout.landing_max_x - engineering_room_width - 8, seed, 947)
+	var/room_min_y = layout.landing_max_y - engineering_room_height + 1
+	var/room_max_x = room_min_x + engineering_room_width - 1
+	var/room_max_y = room_min_y + engineering_room_height - 1
+	build_lz_room(layout, landing_area, room_min_x, room_min_y, room_max_x, room_max_y, /turf/open/floor/asteroidfloor)
+	for(var/tile_x in room_min_x + 1 to room_max_x - 1)
+		for(var/tile_y in room_min_y + 1 to room_max_y - 1)
+			var/turf/decal_turf = locate(tile_x, tile_y, layout.z_level)
+			if(decal_turf)
+				new /obj/effect/turf_decal/tile/transparent/yellow/diagonal_centre(decal_turf)
+	var/turf/apc_turf = locate(room_min_x + 1, room_max_y - 1, layout.z_level)
+	if(apc_turf)
+		new /obj/machinery/power/apc(apc_turf)
+	var/turf/engivend_turf = locate(room_min_x + 2, room_min_y + 2, layout.z_level)
+	if(engivend_turf)
+		new /obj/machinery/vending/engivend(engivend_turf)
+	var/turf/toolvend_turf = locate(room_max_x - 1, room_min_y + 2, layout.z_level)
+	if(toolvend_turf)
+		new /obj/machinery/vending/tool(toolvend_turf)
+	place_lz_room_airlock(locate(room_min_x + round(engineering_room_width / 2), room_min_y, layout.z_level), /turf/open/floor/asteroidfloor, landing_area)
+	place_room_lights(layout, room_min_x, room_min_y, room_max_x, room_max_y)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_weapon_room(datum/procedural_frontier_layout/layout, area/landing_area, seed)
+	var/room_min_x = get_room_edge_offset(layout.landing_min_x + 8, layout.landing_max_x - weapon_room_width - 8, seed, 971)
+	var/room_min_y = layout.landing_min_y
+	var/room_max_x = room_min_x + weapon_room_width - 1
+	var/room_max_y = room_min_y + weapon_room_height - 1
+	build_lz_room(layout, landing_area, room_min_x, room_min_y, room_max_x, room_max_y, /turf/open/floor/mainship/metal/gray)
+	// Keep all three vendors flush against the same inner wall in one line.
+	var/list/vendor_types = list(
+		/obj/machinery/vending/weapon,
+		/obj/machinery/vending/armor_supply,
+		/obj/machinery/vending/uniform_supply,
+	)
+	var/vendor_index = 0
+	for(var/vendor_type in vendor_types)
+		var/turf/vendor_turf = locate(room_min_x + 1 + vendor_index++, room_min_y + 1, layout.z_level)
+		if(vendor_turf)
+			new vendor_type(vendor_turf)
+	place_lz_room_airlock(locate(round((room_min_x + room_max_x) / 2), room_max_y, layout.z_level), /turf/open/floor/mainship/metal/gray, landing_area)
+	place_room_lights(layout, room_min_x, room_min_y, room_max_x, room_max_y)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_toilet_room(datum/procedural_frontier_layout/layout, area/landing_area, seed)
+	var/room_min_x = get_room_edge_offset(layout.landing_max_x - toilet_room_width - 3, layout.landing_max_x - toilet_room_width + 1, seed, 991)
+	var/room_min_y = layout.landing_min_y
+	var/room_max_x = room_min_x + toilet_room_width - 1
+	var/room_max_y = room_min_y + toilet_room_height - 1
+	build_lz_room(layout, landing_area, room_min_x, room_min_y, room_max_x, room_max_y, /turf/open/floor/prison/darkyellow/full, /turf/closed/wall/mineral/gold)
+	var/turf/toilet_turf = locate(round((room_min_x + room_max_x) / 2), round((room_min_y + room_max_y) / 2), layout.z_level)
+	if(toilet_turf)
+		new /obj/structure/toilet/alternate(toilet_turf)
+	place_lz_room_airlock(locate(round((room_min_x + room_max_x) / 2), room_max_y, layout.z_level), /turf/open/floor/prison/darkyellow/full, landing_area)
+	place_room_lights(layout, room_min_x, room_min_y, room_max_x, room_max_y)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/get_room_edge_offset(min_value, max_value, seed, salt)
+	if(max_value <= min_value)
+		return min_value
+	return min_value + round(procedural_frontier_hash(salt, salt + 7, seed) * (max_value - min_value))
+
+/obj/effect/landmark/procedural_frontier_generator/proc/build_lz_room(datum/procedural_frontier_layout/layout, area/landing_area, room_min_x, room_min_y, room_max_x, room_max_y, floor_type, wall_type = /turf/closed/wall/r_wall)
+	for(var/tile_x in room_min_x to room_max_x)
+		for(var/tile_y in room_min_y to room_max_y)
+			var/turf/room_turf = locate(tile_x, tile_y, layout.z_level)
+			if(!room_turf)
+				continue
+			var/is_room_border = tile_x == room_min_x || tile_x == room_max_x || tile_y == room_min_y || tile_y == room_max_y
+			set_turf_and_area(room_turf, is_room_border ? wall_type : floor_type, landing_area)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_room_lights(datum/procedural_frontier_layout/layout, room_min_x, room_min_y, room_max_x, room_max_y)
+	var/list/light_positions = list(
+		list(room_min_x + 1, room_min_y + 1),
+		list(room_max_x - 1, room_min_y + 1),
+	)
+	for(var/list/light_position in light_positions)
+		var/turf/light_turf = locate(light_position[1], light_position[2], layout.z_level)
+		if(light_turf && istype(light_turf, /turf/open) && !length(light_turf.contents))
+			new /obj/machinery/light(light_turf)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_lz_room_airlock(turf/airlock_turf, floor_type, area/landing_area)
+	if(!airlock_turf)
+		return
+	airlock_turf = set_turf_and_area(airlock_turf, floor_type, landing_area)
+	new /obj/machinery/door/airlock/mainship/engineering/free_access(airlock_turf)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_landing_random_props(datum/procedural_frontier_layout/layout)
+	var/list/candidates = list()
+	for(var/tile_x in layout.landing_min_x + 2 to layout.landing_max_x - 2)
+		for(var/tile_y in layout.landing_min_y + 2 to layout.landing_max_y - 2)
+			if(layout.is_pad(tile_x, tile_y))
+				continue
+			var/turf/candidate = locate(tile_x, tile_y, layout.z_level)
+			if(candidate && istype(candidate, /turf/open) && !length(candidate.contents))
+				candidates += candidate
+	for(var/i in 1 to lz_barrel_count)
+		var/turf/barrel_turf = pick_n_take(candidates)
+		if(barrel_turf)
+			new /obj/effect/spawner/random/misc/structure/barrel(barrel_turf)
+	for(var/i in 1 to lz_supplycrate_count)
+		var/turf/crate_turf = pick_n_take(candidates)
+		if(crate_turf)
+			new /obj/effect/spawner/random/misc/structure/supplycrate(crate_turf)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_deep_walls(datum/procedural_frontier_layout/layout, area/cave_area, seed)
 	// Deep walls are based on separation from open cave tiles, never on LZ
@@ -438,10 +702,45 @@
 			return FALSE
 	return TRUE
 
-/obj/effect/landmark/procedural_frontier_generator/proc/place_platinum_landmarks(list/open_cave_tiles)
-	var/list/mineral_candidates = open_cave_tiles.Copy()
-	for(var/i in 1 to min(miner_platinum_count, length(mineral_candidates)))
-		new /obj/effect/landmark/miner_platinum(pick_n_take(mineral_candidates))
+/obj/effect/landmark/procedural_frontier_generator/proc/place_platinum_miners(list/open_cave_tiles, datum/procedural_frontier_layout/layout, list/placed_miner_tiles)
+	var/list/candidates = list()
+	var/turf/landing_center = layout.get_landing_center()
+	for(var/turf/candidate in open_cave_tiles)
+		if(landing_center && get_dist(candidate, landing_center) > landing_surface_radius)
+			candidates += candidate
+	if(!length(candidates))
+		candidates = open_cave_tiles.Copy()
+	select_spaced_miner_tiles(candidates, /obj/effect/landmark/miner_platinum, miner_platinum_count, placed_miner_tiles)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_phoron_miners(list/open_cave_tiles, datum/procedural_frontier_layout/layout, list/placed_miner_tiles)
+	var/list/candidates = list()
+	var/turf/landing_center = layout.get_landing_center()
+	for(var/turf/candidate in open_cave_tiles)
+		if(landing_center && get_dist(candidate, landing_center) <= miner_phoron_radius)
+			candidates += candidate
+	select_spaced_miner_tiles(candidates, /obj/effect/landmark/miner_phoron, miner_phoron_count, placed_miner_tiles)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/select_spaced_miner_tiles(list/candidates, landmark_type, miner_count, list/placed_miner_tiles)
+	var/list/remaining = candidates.Copy()
+	for(var/i in 1 to min(miner_count, length(remaining)))
+		var/turf/best_turf
+		var/best_score = -1
+		for(var/turf/candidate in remaining)
+			var/nearest_distance = INFINITY
+			for(var/turf/placed_turf in placed_miner_tiles)
+				nearest_distance = min(nearest_distance, get_dist(candidate, placed_turf))
+			if(!length(placed_miner_tiles))
+				nearest_distance = 0
+			if(nearest_distance < miner_minimum_spacing && length(placed_miner_tiles))
+				continue
+			if(nearest_distance > best_score)
+				best_score = nearest_distance
+				best_turf = candidate
+		if(!best_turf)
+			break
+		new landmark_type(best_turf)
+		placed_miner_tiles += best_turf
+		remaining -= best_turf
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_xenomorph_spawns(list/open_cave_tiles)
 	if(!length(open_cave_tiles))
