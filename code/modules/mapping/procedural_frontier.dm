@@ -19,6 +19,11 @@
 	icon_state = "green"
 	minimap_color = MINIMAP_AREA_LZ
 
+/area/procedural_frontier/landing/lz1
+	name = "Landing Zone One"
+	icon_state = "away1"
+	area_flags = NONE
+
 // All coordinates derived for one map-generation run.
 /datum/procedural_frontier_layout
 	var/z_level
@@ -34,6 +39,10 @@
 	var/landing_max_y
 	var/landing_center_x
 	var/landing_center_y
+	var/pad_min_x
+	var/pad_max_x
+	var/pad_min_y
+	var/pad_max_y
 	var/max_landing_distance
 	var/landing_edge_factor
 
@@ -42,6 +51,12 @@
 
 /datum/procedural_frontier_layout/proc/is_landing(x, y)
 	return x >= landing_min_x && x <= landing_max_x && y >= landing_min_y && y <= landing_max_y
+
+/datum/procedural_frontier_layout/proc/is_landing_border(x, y)
+	return is_landing(x, y) && (x == landing_min_x || x == landing_max_x || y == landing_min_y || y == landing_max_y)
+
+/datum/procedural_frontier_layout/proc/is_pad(x, y)
+	return x >= pad_min_x && x <= pad_max_x && y >= pad_min_y && y <= pad_max_y
 
 /datum/procedural_frontier_layout/proc/get_landing_center()
 	return locate(landing_center_x, landing_center_y, z_level)
@@ -103,6 +118,8 @@
 	var/landing_height = 30
 	var/landing_edge_margin = 8
 	var/landing_exit_length = 18
+	var/pad_width = 11
+	var/pad_height = 21
 
 	// Cave-density profile. The LZ surface is always open; farther away, the
 	// ridge cutoff rises according to the exponential gradient.
@@ -128,6 +145,7 @@
 	var/tunnel_minimum_spacing = 24
 	var/miner_platinum_count = 16
 	var/xenomorph_spawn_count = 3
+	var/excavation_site_count = 20
 
 /obj/effect/landmark/procedural_frontier_generator/Initialize(mapload)
 	. = ..()
@@ -142,16 +160,18 @@
 	if(!layout)
 		return
 	var/area/cave_area = new /area/procedural_frontier
-	var/area/landing_area = new /area/procedural_frontier/landing
+	var/area/landing_area = new /area/procedural_frontier/landing/lz1
 
 	generate_terrain(layout, cave_area, landing_area, seed)
-	carve_landing_exit(layout, cave_area)
+	carve_landing_exit(layout, cave_area, landing_area)
+	place_landing_docking_port(layout)
 	place_deep_walls(layout, cave_area, seed)
 	var/list/open_cave_tiles = retain_reachable_cave_tiles(layout, cave_area, landing_area)
 	place_weed_nodes(open_cave_tiles)
 	place_xeno_tunnels(open_cave_tiles, layout)
 	place_platinum_landmarks(open_cave_tiles)
 	place_xenomorph_spawns(open_cave_tiles)
+	place_excavation_sites(open_cave_tiles, layout)
 
 	smooth_zlevel(layout.z_level)
 	log_game("Procedural Frontier caves generated: [map_width]x[map_height], landing at ([layout.landing_center_x],[layout.landing_center_y]), seed [seed]")
@@ -176,6 +196,10 @@
 	layout.landing_max_y = layout.landing_min_y + landing_height - 1
 	layout.landing_center_x = round((layout.landing_min_x + layout.landing_max_x) / 2)
 	layout.landing_center_y = round((layout.landing_min_y + layout.landing_max_y) / 2)
+	layout.pad_min_x = layout.landing_center_x - round((pad_width - 1) / 2)
+	layout.pad_max_x = layout.pad_min_x + pad_width - 1
+	layout.pad_min_y = layout.landing_center_y - round((pad_height - 1) / 2)
+	layout.pad_max_y = layout.pad_min_y + pad_height - 1
 	layout.max_landing_distance = get_farthest_edge_distance(layout)
 	layout.landing_edge_factor = get_landing_edge_factor(layout)
 	return layout
@@ -210,7 +234,12 @@
 			if(!current_turf)
 				continue
 			if(layout.is_landing(tile_x, tile_y))
-				set_turf_and_area(current_turf, /turf/open/floor/plating/ground/mars, landing_area)
+				if(layout.is_landing_border(tile_x, tile_y))
+					set_turf_and_area(current_turf, /turf/closed/wall/r_wall, landing_area)
+				else if(layout.is_pad(tile_x, tile_y))
+					set_turf_and_area(current_turf, /turf/open/floor/plating, landing_area)
+				else
+					set_turf_and_area(current_turf, /turf/open/floor/plating/ground/mars, landing_area)
 				continue
 			if(layout.is_border(tile_x, tile_y))
 				set_turf_and_area(current_turf, /turf/closed/mineral/smooth/bigred/indestructible, cave_area)
@@ -235,13 +264,30 @@
 	new_turf.change_area(new_turf.loc, target_area)
 	return new_turf
 
-/obj/effect/landmark/procedural_frontier_generator/proc/carve_landing_exit(datum/procedural_frontier_layout/layout, area/cave_area)
-	var/exit_x = layout.landing_center_x
-	var/exit_min_y = max(layout.map_min_y + 1, layout.landing_min_y - landing_exit_length)
-	for(var/exit_y = layout.landing_min_y - 1; exit_y >= exit_min_y; exit_y--)
-		var/turf/exit_turf = locate(exit_x, exit_y, layout.z_level)
-		if(exit_turf)
-			set_turf_and_area(exit_turf, /turf/open/floor/plating/ground/mars/random/cave, cave_area)
+/obj/effect/landmark/procedural_frontier_generator/proc/carve_landing_exit(datum/procedural_frontier_layout/layout, area/cave_area, area/landing_area)
+	var/list/exit_centers = list(layout.landing_min_x + 6, layout.landing_max_x - 6)
+	for(var/exit_center_x in exit_centers)
+		for(var/exit_x in exit_center_x - 1 to exit_center_x + 1)
+			for(var/exit_y = layout.landing_min_y - 1, exit_y >= max(layout.map_min_y + 1, layout.landing_min_y - landing_exit_length), exit_y--)
+				var/turf/exit_turf = locate(exit_x, exit_y, layout.z_level)
+				if(exit_turf)
+					set_turf_and_area(exit_turf, /turf/open/floor/plating/ground/mars/random/cave, cave_area)
+	// Remove the two three-tile sections from the south wall after carving.
+	for(var/exit_center_x in exit_centers)
+		for(var/exit_x in exit_center_x - 1 to exit_center_x + 1)
+			var/turf/wall_gap = locate(exit_x, layout.landing_min_y, layout.z_level)
+			if(wall_gap)
+				set_turf_and_area(wall_gap, /turf/open/floor/plating, landing_area)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_landing_docking_port(datum/procedural_frontier_layout/layout)
+	var/turf/landing_center = layout.get_landing_center()
+	if(landing_center)
+		var/obj/docking_port/stationary/marine_dropship/lz1/docking_port = new(landing_center)
+		docking_port.area_type = /area/procedural_frontier/landing/lz1
+	// The button is mounted on the inner side of the west wall.
+	var/turf/button_turf = locate(layout.landing_min_x + 1, layout.landing_center_y, layout.z_level)
+	if(button_turf)
+		new /obj/machinery/button/door/open_only/landing_zone(button_turf)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_deep_walls(datum/procedural_frontier_layout/layout, area/cave_area, seed)
 	// Deep walls are based on separation from open cave tiles, never on LZ
@@ -355,3 +401,13 @@
 	for(var/spawn_index in 1 to xenomorph_spawn_count)
 		var/list_index = round(1 + (length(open_cave_tiles) - 1) * (spawn_index - 1) / max(1, xenomorph_spawn_count - 1))
 		new /obj/effect/landmark/start/job/xenomorph(open_cave_tiles[list_index])
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_excavation_sites(list/open_cave_tiles, datum/procedural_frontier_layout/layout)
+	var/list/site_candidates = list()
+	for(var/turf/candidate in open_cave_tiles)
+		if(get_dist(candidate, layout.get_landing_center()) > landing_surface_radius)
+			site_candidates += candidate
+	for(var/i in 1 to min(excavation_site_count, length(site_candidates)))
+		var/turf/site_turf = pick_n_take(site_candidates)
+		if(site_turf)
+			new /obj/effect/landmark/excavation_site_spawner(site_turf)
