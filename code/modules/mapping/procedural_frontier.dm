@@ -68,6 +68,10 @@
 	var/max_landing_distance
 	var/landing_edge_factor
 	var/landing_exit_direction
+	var/generator_room_min_x
+	var/generator_room_max_x
+	var/generator_room_min_y
+	var/generator_room_max_y
 
 /datum/procedural_frontier_layout/proc/is_border(x, y)
 	return x == map_min_x || x == map_max_x || y == map_min_y || y == map_max_y
@@ -77,6 +81,9 @@
 
 /datum/procedural_frontier_layout/proc/is_landing_border(x, y)
 	return is_landing(x, y) && (x == landing_min_x || x == landing_max_x || y == landing_min_y || y == landing_max_y)
+
+/datum/procedural_frontier_layout/proc/is_generator_room(x, y)
+	return generator_room_min_x && x >= generator_room_min_x && x <= generator_room_max_x && y >= generator_room_min_y && y <= generator_room_max_y
 
 /datum/procedural_frontier_layout/proc/is_pad(x, y)
 	return x >= pad_min_x && x <= pad_max_x && y >= pad_min_y && y <= pad_max_y
@@ -359,6 +366,8 @@
 			// Keep the LZ and its external containment ring in their dedicated
 			// area so NEAR_FOB and shutter handling remain intact.
 			if(tile_x >= layout.landing_min_x - 1 && tile_x <= layout.landing_max_x + 1 && tile_y >= layout.landing_min_y - 1 && tile_y <= layout.landing_max_y + 1)
+				continue
+			if(layout.is_generator_room(tile_x, tile_y))
 				continue
 			var/turf/current_turf = locate(tile_x, tile_y, layout.z_level)
 			if(!current_turf)
@@ -837,6 +846,10 @@
 	var/min_y = room_center_y - half_height
 	var/max_x = min_x + generator_room_width - 1
 	var/max_y = min_y + generator_room_height - 1
+	layout.generator_room_min_x = min_x
+	layout.generator_room_max_x = max_x
+	layout.generator_room_min_y = min_y
+	layout.generator_room_max_y = max_y
 	for(var/tile_x in min_x to max_x)
 		for(var/tile_y in min_y to max_y)
 			var/turf/room_turf = locate(tile_x, tile_y, layout.z_level)
@@ -971,10 +984,18 @@
 /obj/effect/landmark/procedural_frontier_generator/proc/place_xenomorph_spawns(list/open_cave_tiles)
 	if(!length(open_cave_tiles))
 		return
-	// Spread deterministic job spawns through the collected cave-tile list.
-	for(var/spawn_index in 1 to xenomorph_spawn_count)
-		var/list_index = round(1 + (length(open_cave_tiles) - 1) * (spawn_index - 1) / max(1, xenomorph_spawn_count - 1))
-		new /obj/effect/landmark/start/job/xenomorph(open_cave_tiles[list_index])
+	var/list/safe_cave_tiles = list()
+	for(var/turf/cave_turf in open_cave_tiles)
+		var/area/cave_area = get_area(cave_turf)
+		if(cave_area && cave_area.ceiling >= CEILING_UNDERGROUND)
+			safe_cave_tiles += cave_turf
+	if(!length(safe_cave_tiles))
+		return
+	// Spread deterministic job spawns only through deep enough sectors. This
+	// prevents xenomorphs from appearing under open-sky storm exposure.
+	for(var/spawn_index in 1 to min(xenomorph_spawn_count, length(safe_cave_tiles)))
+		var/list_index = round(1 + (length(safe_cave_tiles) - 1) * (spawn_index - 1) / max(1, xenomorph_spawn_count - 1))
+		new /obj/effect/landmark/start/job/xenomorph(safe_cave_tiles[list_index])
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_excavation_sites(list/open_cave_tiles, datum/procedural_frontier_layout/layout)
 	var/list/site_candidates = list()
