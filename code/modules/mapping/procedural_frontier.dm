@@ -59,6 +59,7 @@
 	var/pad_max_y
 	var/max_landing_distance
 	var/landing_edge_factor
+	var/landing_exit_direction
 
 /datum/procedural_frontier_layout/proc/is_border(x, y)
 	return x == map_min_x || x == map_max_x || y == map_min_y || y == map_max_y
@@ -165,14 +166,14 @@
 	var/miner_minimum_spacing = 10
 	var/supply_room_width = 6
 	var/supply_room_height = 6
-	var/medical_room_width = 7
-	var/medical_room_height = 7
+	var/medical_room_width = 6
+	var/medical_room_height = 6
 	var/engineering_room_width = 6
 	var/engineering_room_height = 6
 	var/weapon_room_width = 6
 	var/weapon_room_height = 6
-	var/toilet_room_width = 4
-	var/toilet_room_height = 4
+	var/toilet_room_width = 6
+	var/toilet_room_height = 6
 	var/toilet_room_chance = 1
 	var/lz_barrel_count = 4
 	var/lz_supplycrate_count = 3
@@ -245,7 +246,15 @@
 	layout.pad_max_y = layout.pad_min_y + pad_height - 1
 	layout.max_landing_distance = get_farthest_edge_distance(layout)
 	layout.landing_edge_factor = get_landing_edge_factor(layout)
+	layout.landing_exit_direction = get_landing_exit_direction(layout)
 	return layout
+
+/obj/effect/landmark/procedural_frontier_generator/proc/get_landing_exit_direction(datum/procedural_frontier_layout/layout)
+	var/offset_x = layout.landing_center_x - layout.map_center_x
+	var/offset_y = layout.landing_center_y - layout.map_center_y
+	if(abs(offset_x) >= abs(offset_y))
+		return offset_x >= 0 ? WEST : EAST
+	return offset_y >= 0 ? SOUTH : NORTH
 
 /obj/effect/landmark/procedural_frontier_generator/proc/get_edge_biased_offset(range, random_value)
 	if(range <= 0)
@@ -388,17 +397,38 @@
 	return new_turf
 
 /obj/effect/landmark/procedural_frontier_generator/proc/carve_landing_exit(datum/procedural_frontier_layout/layout, area/cave_area, area/landing_area)
-	var/list/exit_centers = list(layout.landing_min_x + 6, layout.landing_max_x - 6)
-	for(var/exit_center_x in exit_centers)
-		for(var/exit_x in exit_center_x - 1 to exit_center_x + 1)
-			for(var/exit_y = layout.landing_min_y - 1, exit_y >= max(layout.map_min_y + 1, layout.landing_min_y - landing_exit_length), exit_y--)
+	var/list/exit_centers = (layout.landing_exit_direction == NORTH || layout.landing_exit_direction == SOUTH) ? list(layout.landing_min_x + 6, layout.landing_max_x - 6) : list(layout.landing_min_y + 6, layout.landing_max_y - 6)
+	for(var/exit_center in exit_centers)
+		for(var/offset in -1 to 1)
+			for(var/distance in 0 to landing_exit_length - 1)
+				var/exit_x = exit_center
+				var/exit_y = exit_center
+				if(layout.landing_exit_direction == NORTH)
+					exit_x += offset
+					exit_y = layout.landing_max_y + 1 + distance
+				else if(layout.landing_exit_direction == SOUTH)
+					exit_x += offset
+					exit_y = layout.landing_min_y - 1 - distance
+				else if(layout.landing_exit_direction == EAST)
+					exit_x = layout.landing_max_x + 1 + distance
+					exit_y += offset
+				else
+					exit_x = layout.landing_min_x - 1 - distance
+					exit_y += offset
+				if(exit_x <= layout.map_min_x || exit_x >= layout.map_max_x || exit_y <= layout.map_min_y || exit_y >= layout.map_max_y)
+					continue
 				var/turf/exit_turf = locate(exit_x, exit_y, layout.z_level)
 				if(exit_turf)
 					set_turf_and_area(exit_turf, /turf/open/floor/asteroidfloor, cave_area)
-	// Remove the two three-tile sections from the south wall after carving.
-	for(var/exit_center_x in exit_centers)
-		for(var/exit_x in exit_center_x - 1 to exit_center_x + 1)
-			var/turf/wall_gap = locate(exit_x, layout.landing_min_y, layout.z_level)
+			var/turf/wall_gap
+			if(layout.landing_exit_direction == NORTH)
+				wall_gap = locate(exit_center + offset, layout.landing_max_y, layout.z_level)
+			else if(layout.landing_exit_direction == SOUTH)
+				wall_gap = locate(exit_center + offset, layout.landing_min_y, layout.z_level)
+			else if(layout.landing_exit_direction == EAST)
+				wall_gap = locate(layout.landing_max_x, exit_center + offset, layout.z_level)
+			else
+				wall_gap = locate(layout.landing_min_x, exit_center + offset, layout.z_level)
 			if(wall_gap)
 				set_turf_and_area(wall_gap, /turf/open/floor/plating, landing_area)
 
@@ -407,8 +437,16 @@
 	if(landing_center)
 		var/obj/docking_port/stationary/marine_dropship/lz1/docking_port = new(landing_center)
 		docking_port.area_type = /area/procedural_frontier/landing/lz1
-	// The button is mounted on the inner side of the west wall.
-	var/turf/button_turf = locate(layout.landing_min_x + 1, layout.landing_center_y, layout.z_level)
+	// Mount the button immediately inside the wall containing the exits.
+	var/turf/button_turf
+	if(layout.landing_exit_direction == NORTH)
+		button_turf = locate(layout.landing_center_x, layout.landing_max_y - 1, layout.z_level)
+	else if(layout.landing_exit_direction == SOUTH)
+		button_turf = locate(layout.landing_center_x, layout.landing_min_y + 1, layout.z_level)
+	else if(layout.landing_exit_direction == EAST)
+		button_turf = locate(layout.landing_max_x - 1, layout.landing_center_y, layout.z_level)
+	else
+		button_turf = locate(layout.landing_min_x + 1, layout.landing_center_y, layout.z_level)
 	if(button_turf)
 		new /obj/machinery/button/door/open_only/landing_zone(button_turf)
 
@@ -437,17 +475,40 @@
 			var/turf/containment_turf = locate(tile_x, tile_y, layout.z_level)
 			if(containment_turf)
 				containment_turf = set_turf_and_area(containment_turf, /turf/open/floor/asteroidfloor, landing_area)
-				new /obj/machinery/door/poddoor/timed_late/containment/landing_zone(containment_turf)
-	// Barricades sit immediately inside each exit, not outside the LZ wall.
-	for(var/exit_center_x in list(layout.landing_min_x + 6, layout.landing_max_x - 6))
-		for(var/exit_x in exit_center_x - 1 to exit_center_x + 1)
-			var/turf/barricade_turf = locate(exit_x, layout.landing_min_y + 1, layout.z_level)
+				var/obj/machinery/door/poddoor/timed_late/containment/landing_zone/containment_door = new(containment_turf)
+				// Poddoors follow the orientation of their ring side. In particular,
+				// the north and south rows are intentionally different directions.
+				if(tile_y == containment_min_y)
+					containment_door.dir = SOUTH
+				else if(tile_y == containment_max_y)
+					containment_door.dir = NORTH
+				else if(tile_x == containment_min_x)
+					containment_door.dir = WEST
+				else
+					containment_door.dir = EAST
+	// Barricades sit immediately inside each exit. Their sprite direction is
+	// perpendicular to the old mapping: north/south walls use NORTH, while
+	// east/west walls use EAST.
+	var/list/exit_centers = (layout.landing_exit_direction == NORTH || layout.landing_exit_direction == SOUTH) ? list(layout.landing_min_x + 6, layout.landing_max_x - 6) : list(layout.landing_min_y + 6, layout.landing_max_y - 6)
+	for(var/exit_center in exit_centers)
+		for(var/offset in -1 to 1)
+			var/turf/barricade_turf
+			if(layout.landing_exit_direction == NORTH)
+				barricade_turf = locate(exit_center + offset, layout.landing_max_y - 1, layout.z_level)
+			else if(layout.landing_exit_direction == SOUTH)
+				barricade_turf = locate(exit_center + offset, layout.landing_min_y + 1, layout.z_level)
+			else if(layout.landing_exit_direction == EAST)
+				barricade_turf = locate(layout.landing_max_x - 1, exit_center + offset, layout.z_level)
+			else
+				barricade_turf = locate(layout.landing_min_x + 1, exit_center + offset, layout.z_level)
 			if(barricade_turf)
-				new /obj/structure/barricade/folding(barricade_turf)
+				var/obj/structure/barricade/folding/barricade = new(barricade_turf)
+				barricade.dir = get_landing_exit_object_dir(layout.landing_exit_direction)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_supply_room(datum/procedural_frontier_layout/layout, area/landing_area, seed)
-	var/room_min_x = layout.landing_min_x
-	var/room_min_y = get_room_edge_offset(layout.landing_min_y + 7, layout.landing_max_y - supply_room_height - 1, seed, 911)
+	var/list/room_origin = get_lz_room_origin(layout, 1, supply_room_width, supply_room_height)
+	var/room_min_x = room_origin[1]
+	var/room_min_y = room_origin[2]
 	var/room_max_x = room_min_x + supply_room_width - 1
 	var/room_max_y = room_min_y + supply_room_height - 1
 	for(var/tile_x in room_min_x to room_max_x)
@@ -468,13 +529,14 @@
 		var/turf/barrel_turf = locate(room_min_x + 2 + i, room_min_y + 2, layout.z_level)
 		if(barrel_turf)
 			new /obj/effect/spawner/random/misc/structure/barrel(barrel_turf)
-	var/turf/airlock_turf = locate(room_min_x + round(supply_room_width / 2), room_min_y, layout.z_level)
+	var/turf/airlock_turf = get_lz_room_airlock_turf(layout, room_min_x, room_min_y, room_max_x, room_max_y)
 	place_lz_room_airlock(airlock_turf, /turf/open/floor/wood, landing_area)
 	place_room_lights(layout, room_min_x, room_min_y, room_max_x, room_max_y)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_medical_room(datum/procedural_frontier_layout/layout, area/landing_area, seed)
-	var/room_min_x = layout.landing_max_x - medical_room_width + 1
-	var/room_min_y = get_room_edge_offset(layout.landing_min_y + 7, layout.landing_max_y - medical_room_height - 1, seed, 929)
+	var/list/room_origin = get_lz_room_origin(layout, 2, medical_room_width, medical_room_height)
+	var/room_min_x = room_origin[1]
+	var/room_min_y = room_origin[2]
 	var/room_max_x = room_min_x + medical_room_width - 1
 	var/room_max_y = room_min_y + medical_room_height - 1
 	build_lz_room(layout, landing_area, room_min_x, room_min_y, room_max_x, room_max_y, /turf/open/floor/mainship/metal/gray)
@@ -490,18 +552,26 @@
 	var/turf/closet_turf = locate(room_min_x + 1, room_max_y - 1, layout.z_level)
 	if(closet_turf)
 		new /obj/structure/closet/secure_closet/medical2(closet_turf)
+	var/turf/marine_med_turf = locate(room_max_x - 1, room_min_y + 1, layout.z_level)
+	if(marine_med_turf)
+		new /obj/machinery/vending/MarineMed(marine_med_turf)
+	var/turf/medical_vend_turf = locate(room_max_x - 1, room_max_y - 1, layout.z_level)
+	if(medical_vend_turf)
+		new /obj/machinery/vending/medical(medical_vend_turf)
 	for(var/table_x in list(room_min_x + 2, room_max_x - 2))
 		var/turf/side_table_turf = locate(table_x, room_max_y - 2, layout.z_level)
 		if(side_table_turf)
 			new /obj/structure/table(side_table_turf)
 			new /obj/item/tank/anesthetic(side_table_turf)
 			new /obj/item/clothing/mask/breath/medical(side_table_turf)
-	place_lz_room_airlock(locate(room_min_x + round(medical_room_width / 2), room_min_y, layout.z_level), /turf/open/floor/mainship/metal/gray, landing_area)
+			new /obj/item/storage/surgical_tray/alt(side_table_turf)
+	place_lz_room_airlock(get_lz_room_airlock_turf(layout, room_min_x, room_min_y, room_max_x, room_max_y), /turf/open/floor/mainship/metal/gray, landing_area)
 	place_room_lights(layout, room_min_x, room_min_y, room_max_x, room_max_y)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_engineering_room(datum/procedural_frontier_layout/layout, area/landing_area, seed)
-	var/room_min_x = get_room_edge_offset(layout.landing_min_x + 8, layout.landing_max_x - engineering_room_width - 8, seed, 947)
-	var/room_min_y = layout.landing_max_y - engineering_room_height + 1
+	var/list/room_origin = get_lz_room_origin(layout, 3, engineering_room_width, engineering_room_height)
+	var/room_min_x = room_origin[1]
+	var/room_min_y = room_origin[2]
 	var/room_max_x = room_min_x + engineering_room_width - 1
 	var/room_max_y = room_min_y + engineering_room_height - 1
 	build_lz_room(layout, landing_area, room_min_x, room_min_y, room_max_x, room_max_y, /turf/open/floor/asteroidfloor)
@@ -519,12 +589,17 @@
 	var/turf/toolvend_turf = locate(room_max_x - 1, room_min_y + 2, layout.z_level)
 	if(toolvend_turf)
 		new /obj/machinery/vending/tool(toolvend_turf)
-	place_lz_room_airlock(locate(room_min_x + round(engineering_room_width / 2), room_min_y, layout.z_level), /turf/open/floor/asteroidfloor, landing_area)
+	var/turf/rack_turf = locate(room_min_x + 1, room_max_y - 1, layout.z_level)
+	if(rack_turf)
+		new /obj/structure/rack(rack_turf)
+		new /obj/item/tool/pickaxe/plasmacutter(rack_turf)
+	place_lz_room_airlock(get_lz_room_airlock_turf(layout, room_min_x, room_min_y, room_max_x, room_max_y), /turf/open/floor/asteroidfloor, landing_area)
 	place_room_lights(layout, room_min_x, room_min_y, room_max_x, room_max_y)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_weapon_room(datum/procedural_frontier_layout/layout, area/landing_area, seed)
-	var/room_min_x = get_room_edge_offset(layout.landing_min_x + 8, layout.landing_max_x - weapon_room_width - 8, seed, 971)
-	var/room_min_y = layout.landing_min_y
+	var/list/room_origin = get_lz_room_origin(layout, 4, weapon_room_width, weapon_room_height)
+	var/room_min_x = room_origin[1]
+	var/room_min_y = room_origin[2]
 	var/room_max_x = room_min_x + weapon_room_width - 1
 	var/room_max_y = room_min_y + weapon_room_height - 1
 	build_lz_room(layout, landing_area, room_min_x, room_min_y, room_max_x, room_max_y, /turf/open/floor/mainship/metal/gray)
@@ -539,25 +614,72 @@
 		var/turf/vendor_turf = locate(room_min_x + 1 + vendor_index++, room_min_y + 1, layout.z_level)
 		if(vendor_turf)
 			new vendor_type(vendor_turf)
-	place_lz_room_airlock(locate(round((room_min_x + room_max_x) / 2), room_max_y, layout.z_level), /turf/open/floor/mainship/metal/gray, landing_area)
+	place_lz_room_airlock(get_lz_room_airlock_turf(layout, room_min_x, room_min_y, room_max_x, room_max_y), /turf/open/floor/mainship/metal/gray, landing_area)
 	place_room_lights(layout, room_min_x, room_min_y, room_max_x, room_max_y)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_toilet_room(datum/procedural_frontier_layout/layout, area/landing_area, seed)
-	var/room_min_x = get_room_edge_offset(layout.landing_max_x - toilet_room_width - 3, layout.landing_max_x - toilet_room_width + 1, seed, 991)
-	var/room_min_y = layout.landing_min_y
+	var/list/room_origin = get_lz_room_origin(layout, 5, toilet_room_width, toilet_room_height)
+	var/room_min_x = room_origin[1]
+	var/room_min_y = room_origin[2]
 	var/room_max_x = room_min_x + toilet_room_width - 1
 	var/room_max_y = room_min_y + toilet_room_height - 1
 	build_lz_room(layout, landing_area, room_min_x, room_min_y, room_max_x, room_max_y, /turf/open/floor/prison/darkyellow/full, /turf/closed/wall/mineral/gold)
 	var/turf/toilet_turf = locate(round((room_min_x + room_max_x) / 2), round((room_min_y + room_max_y) / 2), layout.z_level)
 	if(toilet_turf)
 		new /obj/structure/toilet/alternate(toilet_turf)
-	place_lz_room_airlock(locate(round((room_min_x + room_max_x) / 2), room_max_y, layout.z_level), /turf/open/floor/prison/darkyellow/full, landing_area)
+	place_lz_room_airlock(get_lz_room_airlock_turf(layout, room_min_x, room_min_y, room_max_x, room_max_y), /turf/open/floor/prison/darkyellow/full, landing_area)
 	place_room_lights(layout, room_min_x, room_min_y, room_max_x, room_max_y)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/get_room_edge_offset(min_value, max_value, seed, salt)
 	if(max_value <= min_value)
 		return min_value
 	return min_value + round(procedural_frontier_hash(salt, salt + 7, seed) * (max_value - min_value))
+
+/obj/effect/landmark/procedural_frontier_generator/proc/get_lz_room_origin(datum/procedural_frontier_layout/layout, slot, room_width, room_height)
+	slot = 1 + ((slot - 1) % 4)
+	var/list/origin = list(layout.landing_min_x + 2, layout.landing_min_y + 2)
+	var/room_gap = 1
+	if(layout.landing_exit_direction == NORTH)
+		origin[1] = layout.landing_min_x + 1 + ((slot - 1) * (room_width + room_gap))
+		origin[2] = layout.landing_min_y
+	else if(layout.landing_exit_direction == SOUTH)
+		origin[1] = layout.landing_min_x + 1 + ((slot - 1) * (room_width + room_gap))
+		origin[2] = layout.landing_max_y - room_height + 1
+	else if(layout.landing_exit_direction == EAST)
+		origin[1] = layout.landing_min_x
+		origin[2] = layout.landing_min_y + 1 + ((slot - 1) * (room_height + room_gap))
+	else
+		origin[1] = layout.landing_max_x - room_width + 1
+		origin[2] = layout.landing_min_y + 1 + ((slot - 1) * (room_height + room_gap))
+	return origin
+
+/obj/effect/landmark/procedural_frontier_generator/proc/get_lz_room_airlock_turf(datum/procedural_frontier_layout/layout, room_min_x, room_min_y, room_max_x, room_max_y)
+	var/door_x = round((room_min_x + room_max_x) / 2)
+	var/door_y = round((room_min_y + room_max_y) / 2)
+	if(layout.landing_exit_direction == NORTH)
+		door_y = room_max_y
+	else if(layout.landing_exit_direction == SOUTH)
+		door_y = room_min_y
+	else if(layout.landing_exit_direction == EAST)
+		door_x = room_max_x
+	else
+		door_x = room_min_x
+	return locate(door_x, door_y, layout.z_level)
+
+//гений мысли, отец русского кодинга
+/obj/effect/landmark/procedural_frontier_generator/proc/get_landing_exit_object_dir(exit_direction)
+	// Folding barricades expose all four cardinal orientations. Keep the
+	// object's facing aligned with the side used by the exit itself.
+	switch(exit_direction)
+		if(NORTH)
+			return NORTH
+		if(SOUTH)
+			return SOUTH
+		if(EAST)
+			return EAST
+		if(WEST)
+			return WEST
+	return SOUTH
 
 /obj/effect/landmark/procedural_frontier_generator/proc/build_lz_room(datum/procedural_frontier_layout/layout, area/landing_area, room_min_x, room_min_y, room_max_x, room_max_y, floor_type, wall_type = /turf/closed/wall/r_wall)
 	for(var/tile_x in room_min_x to room_max_x)

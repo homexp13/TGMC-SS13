@@ -62,7 +62,10 @@ for one run, so additional biomes or structures can consume the same map
 geometry without duplicating boundary and landing calculations.
 
 The landing zone receives compact supply, medical, engineering, and weapon
-rooms, each with two lights and a free-access airlock. Their positions are
-seeded and vary along the LZ boundary from round to round. A toilet room is
-created with a one-percent chance. Miner placement uses separate near-LZ and
-remote-cave passes with a configurable minimum spacing.
+rooms, each with two lights and a free-access airlock. All rooms use a compact
+6x6 footprint and are placed along the side opposite the generated exit. The
+exit is selected opposite the nearest map edge (for example, a southern LZ gets
+a northern exit); barricades and containment poddoors receive matching
+orientation. A toilet room is created with a one-percent chance. Miner
+placement uses separate near-LZ and remote-cave passes with a configurable
+minimum spacing.
