@@ -73,6 +73,12 @@ orientation. A toilet room is created with a one-percent chance. Miner
 placement uses separate near-LZ and remote-cave passes with a configurable
 minimum spacing.
 
+At generation start one of three biome presets is selected from the round seed:
+Jungle (acid rain, smooth rock, dirt floor), Desert (sandstorm, Big Red rock,
+Mars cave floor), or Taiga (snowstorm, Big Red rock, snow layer 2 floor). The
+selected weather trait is applied to the current z-level at runtime, replacing
+the weather flag supplied by the map JSON.
+
 A central generator room is carved near the map centre (offset only when it
 would overlap the LZ). It contains an APC on the wall and three adjacent
 geothermal generators. North and south free-access airlocks are connected to

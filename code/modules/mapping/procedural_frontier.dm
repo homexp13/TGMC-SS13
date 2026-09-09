@@ -211,6 +211,9 @@
 	var/lz_supplycrate_count = 3
 	var/xenomorph_spawn_count = 3
 	var/excavation_site_count = 20
+	// Selected biome preset is applied once per generation using the round seed.
+	var/selected_biome_name = ""
+	var/selected_weather_trait
 	// Central geothermal room. It is carved after cave reachability is known,
 	// then linked back to the live cave network through two opposite entrances.
 	var/generator_room_width = 12
@@ -228,6 +231,7 @@
 	var/datum/procedural_frontier_layout/layout = create_layout(seed)
 	if(!layout)
 		return
+	select_biome_preset(seed)
 	var/area/cave_area = new /area/procedural_frontier
 	var/area/landing_area = new /area/procedural_frontier/landing/lz1
 	var/area/generator_area = new /area/procedural_frontier/generator_room
@@ -257,6 +261,53 @@
 
 	smooth_zlevel(layout.z_level)
 	log_game("Procedural Frontier caves generated: [map_width]x[map_height], landing at ([layout.landing_center_x],[layout.landing_center_y]), seed [seed]")
+
+/obj/effect/landmark/procedural_frontier_generator/proc/select_biome_preset(seed)
+	var/list/presets = list(
+		list("name" = "Jungle", "weather" = ZTRAIT_ACIDRAIN, "wall" = /turf/closed/mineral/smooth, "deep_wall" = /turf/closed/mineral/smooth/indestructible, "floor" = /turf/open/floor/plating/ground/dirt),
+		list("name" = "Desert", "weather" = ZTRAIT_SANDSTORM, "wall" = /turf/closed/mineral/smooth/bigred, "deep_wall" = /turf/closed/mineral/smooth/bigred/indestructible, "floor" = /turf/open/floor/plating/ground/mars/random/cave),
+		list("name" = "Taiga", "weather" = ZTRAIT_SNOWSTORM, "wall" = /turf/closed/mineral/smooth/bluefrostwall, "deep_wall" = /turf/closed/mineral/smooth/darkfrostwall/indestructible, "floor" = /turf/open/floor/plating/ground/snow/layer2)
+	)
+	var/preset_index = 1 + round(procedural_frontier_hash(3601, 41, seed) * (length(presets) - 1))
+	var/list/preset = presets[preset_index]
+	selected_biome_name = preset["name"]
+	selected_weather_trait = preset["weather"]
+	cave_wall_type = preset["wall"]
+	deep_cave_wall_type = preset["deep_wall"]
+	cave_floor_type = preset["floor"]
+	configure_biome_weather(selected_weather_trait)
+	log_game("Procedural Frontier biome preset: [selected_biome_name]")
+
+/obj/effect/landmark/procedural_frontier_generator/proc/configure_biome_weather(weather_trait)
+	var/datum/space_level/current_level = SSmapping.get_level(z)
+	if(!current_level)
+		return
+	var/list/weather_traits = list(ZTRAIT_ACIDRAIN, ZTRAIT_SANDSTORM, ZTRAIT_SNOWSTORM)
+	for(var/trait in weather_traits)
+		if(current_level.traits[trait])
+			current_level.traits -= trait
+		var/list/trait_levels = SSmapping.z_trait_levels[trait]
+		if(islist(trait_levels))
+			trait_levels -= z
+	current_level.traits[weather_trait] = TRUE
+	var/list/selected_trait_levels = SSmapping.z_trait_levels[weather_trait]
+	if(!islist(selected_trait_levels))
+		selected_trait_levels = list()
+		SSmapping.z_trait_levels[weather_trait] = selected_trait_levels
+	if(!(z in selected_trait_levels))
+		selected_trait_levels += z
+	if(SSweather?.initialized)
+		var/list/eligible = SSweather.eligible_zlevels["[z]"]
+		if(!eligible)
+			eligible = list()
+		for(var/weather_type_path in subtypesof(/datum/weather))
+			var/datum/weather/weather_type = weather_type_path
+			var/target_trait = initial(weather_type.target_trait)
+			if(target_trait == weather_trait)
+				eligible[weather_type_path] = initial(weather_type.probability)
+			else
+				eligible -= weather_type_path
+		SSweather.eligible_zlevels["[z]"] = eligible
 
 /obj/effect/landmark/procedural_frontier_generator/proc/create_layout(seed)
 	var/datum/procedural_frontier_layout/layout = new

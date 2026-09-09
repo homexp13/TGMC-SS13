@@ -8,10 +8,5 @@
     "quickbuilds":  1800,
     "parallax_icon":  "redrock",
     "armor":  "desert",
-    "announce_text":  "A vast, shifting cave system surrounds the expedition landing zone.",
-    "traits":  [
-                   {
-                       "weather_sandstorm":  true
-                   }
-               ]
+    "announce_text":  "A vast, shifting cave system surrounds the expedition landing zone."
 }
