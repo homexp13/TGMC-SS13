@@ -26,6 +26,9 @@ The configurable variables on
 * `landing_edge_margin` — minimum distance between the pad and map edge.
 * `landing_edge_opening` — exponential gradient rate (currently `4.0`).
 * `landing_surface_radius` — open terrain radius around the LZ (currently 24).
+* `ceiling_gradient_min` / `ceiling_gradient_max` — range used to map distance
+  to ceiling levels. The default `-1..7` is clamped to `0..7`, widening the
+  central `CEILING_NONE` area while preserving the deepest level.
 * `cave_ridge_threshold` — base ridge-noise cutoff.
 * `central_landing_complexity` — extra cutoff for a central pad; it fades out
   toward map edges, so edge pads produce more open caves.
@@ -69,3 +72,9 @@ a northern exit); barricades and containment poddoors receive matching
 orientation. A toilet room is created with a one-percent chance. Miner
 placement uses separate near-LZ and remote-cave passes with a configurable
 minimum spacing.
+
+A central generator room is carved near the map centre (offset only when it
+would overlap the LZ). It contains an APC on the wall and three adjacent
+geothermal generators. North and south free-access airlocks are connected to
+the nearest reachable cave tiles, allowing the cave route to pass through the
+room instead of leaving it isolated.

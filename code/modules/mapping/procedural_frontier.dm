@@ -38,6 +38,14 @@
 	always_unpowered = TRUE
 	minimap_color = MINIMAP_AREA_CAVES
 
+/area/procedural_frontier/generator_room
+	name = "Geothermal Generator Room"
+	icon_state = "away1"
+	ceiling = CEILING_UNDERGROUND_METAL
+	outside = FALSE
+	always_unpowered = FALSE
+	minimap_color = rgb(120, 120, 120)
+
 // All coordinates derived for one map-generation run.
 /datum/procedural_frontier_layout
 	var/z_level
@@ -142,6 +150,11 @@
 	var/landing_surface_radius = 24
 	var/landing_edge_opening = 4.0
 	var/ceiling_distance_rate = 0.35
+	// The gradient is evaluated over an extended range and clamped to the
+	// actual CEILING constants afterwards. A negative lower bound deliberately
+	// makes the central CEILING_NONE band wider than the other levels.
+	var/ceiling_gradient_min = -1
+	var/ceiling_gradient_max = CEILING_DEEP_UNDERGROUND_METAL
 	var/remote_cave_cutoff = 0.82
 	var/cave_ridge_threshold = 0.0
 	var/central_landing_complexity = 0.18
@@ -179,6 +192,10 @@
 	var/lz_supplycrate_count = 3
 	var/xenomorph_spawn_count = 3
 	var/excavation_site_count = 20
+	// Central geothermal room. It is carved after cave reachability is known,
+	// then linked back to the live cave network through two opposite entrances.
+	var/generator_room_width = 12
+	var/generator_room_height = 9
 
 /obj/effect/landmark/procedural_frontier_generator/Initialize(mapload)
 	. = ..()
@@ -194,6 +211,7 @@
 		return
 	var/area/cave_area = new /area/procedural_frontier
 	var/area/landing_area = new /area/procedural_frontier/landing/lz1
+	var/area/generator_area = new /area/procedural_frontier/generator_room
 
 	generate_terrain(layout, cave_area, landing_area, seed)
 	carve_landing_exit(layout, cave_area, landing_area)
@@ -208,6 +226,7 @@
 	place_landing_random_props(layout)
 	place_deep_walls(layout, cave_area, seed)
 	var/list/open_cave_tiles = retain_reachable_cave_tiles(layout, cave_area, landing_area)
+	place_generator_room(layout, generator_area, cave_area, open_cave_tiles, seed)
 	assign_cave_areas(layout)
 	place_weed_nodes(open_cave_tiles)
 	place_xeno_tunnels(open_cave_tiles, layout)
@@ -285,9 +304,12 @@
 	return clamp(max(relative_x, relative_y), 0, 1)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/get_ceiling_level(distance_from_landing, datum/procedural_frontier_layout/layout)
-	// Map the exponential distance profile onto all eight CEILING constants.
+	// Map the exponential distance profile onto an extended -1..7 range, then
+	// clamp it to the valid CEILING constants (0..7).
 	var/normalized_distance = procedural_frontier_landing_threshold(distance_from_landing, layout.max_landing_distance, ceiling_distance_rate)
-	return clamp(round(normalized_distance * CEILING_DEEP_UNDERGROUND_METAL), CEILING_NONE, CEILING_DEEP_UNDERGROUND_METAL)
+	var/gradient_span = max(1, ceiling_gradient_max - ceiling_gradient_min)
+	var/raw_ceiling = round(ceiling_gradient_min + normalized_distance * gradient_span)
+	return clamp(raw_ceiling, CEILING_NONE, CEILING_DEEP_UNDERGROUND_METAL)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/get_cave_area_color(ceiling_level)
 	// Keep shallow/outside areas light and progressively darken underground
@@ -786,6 +808,88 @@
 			else if(istype(cave_turf, /turf/open))
 				set_turf_and_area(cave_turf, /turf/closed/mineral/smooth/bigred, cave_area)
 	return reachable_tiles
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_generator_room(datum/procedural_frontier_layout/layout, area/generator_area, area/cave_area, list/open_cave_tiles, seed)
+	var/half_width = round(generator_room_width / 2)
+	var/half_height = round(generator_room_height / 2)
+	var/room_center_x = layout.map_center_x
+	var/room_center_y = layout.map_center_y
+	// Keep the room approximately central, but move it to the nearest valid
+	// point when the random landing zone occupies the exact map centre.
+	var/found_room_position = FALSE
+	for(var/ring in 0 to 24)
+		var/list/candidates = list(list(0, 0), list(ring, 0), list(-ring, 0), list(0, ring), list(0, -ring))
+		for(var/list/offset in candidates)
+			var/test_min_x = room_center_x + offset[1] - half_width
+			var/test_min_y = room_center_y + offset[2] - half_height
+			var/test_max_x = test_min_x + generator_room_width - 1
+			var/test_max_y = test_min_y + generator_room_height - 1
+			if(test_min_x <= layout.map_min_x + 1 || test_max_x >= layout.map_max_x - 1 || test_min_y <= layout.map_min_y + 1 || test_max_y >= layout.map_max_y - 1)
+				continue
+			if(test_max_x < layout.landing_min_x - 2 || test_min_x > layout.landing_max_x + 2 || test_max_y < layout.landing_min_y - 2 || test_min_y > layout.landing_max_y + 2)
+				room_center_x += offset[1]
+				room_center_y += offset[2]
+				found_room_position = TRUE
+				break
+		if(found_room_position)
+			break
+	var/min_x = room_center_x - half_width
+	var/min_y = room_center_y - half_height
+	var/max_x = min_x + generator_room_width - 1
+	var/max_y = min_y + generator_room_height - 1
+	for(var/tile_x in min_x to max_x)
+		for(var/tile_y in min_y to max_y)
+			var/turf/room_turf = locate(tile_x, tile_y, layout.z_level)
+			if(!room_turf)
+				continue
+			var/is_border = tile_x == min_x || tile_x == max_x || tile_y == min_y || tile_y == max_y
+			set_turf_and_area(room_turf, is_border ? /turf/closed/wall/r_wall : /turf/open/floor/asteroidfloor, generator_area)
+	// APC is mounted against the east wall. The generators are three adjacent
+	// machines on one line, leaving clear space around the feature.
+	var/turf/apc_turf = locate(max_x, room_center_y, layout.z_level)
+	if(apc_turf)
+		new /obj/machinery/power/apc(apc_turf)
+	for(var/generator_index in 1 to 3)
+		var/turf/generator_turf = locate(room_center_x - 1 + generator_index, room_center_y, layout.z_level)
+		if(generator_turf)
+			new /obj/machinery/power/geothermal(generator_turf)
+	// Opposite-side doors make the room a pass-through rather than a sealed
+	// island. Each route targets the nearest reachable cave tile on that side.
+	place_generator_room_exit(layout, generator_area, cave_area, open_cave_tiles, room_center_x, max_y, NORTH, seed)
+	place_generator_room_exit(layout, generator_area, cave_area, open_cave_tiles, room_center_x, min_y, SOUTH, seed + 1)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_generator_room_exit(datum/procedural_frontier_layout/layout, area/generator_area, area/cave_area, list/open_cave_tiles, entry_x, entry_y, direction, seed)
+	var/turf/target
+	var/best_distance = INFINITY
+	for(var/turf/candidate in open_cave_tiles)
+		if(direction == NORTH && candidate.y <= entry_y)
+			continue
+		if(direction == SOUTH && candidate.y >= entry_y)
+			continue
+		if(abs(candidate.x - entry_x) > 32)
+			continue
+		var/distance = abs(candidate.x - entry_x) + abs(candidate.y - entry_y)
+		if(distance < best_distance)
+			best_distance = distance
+			target = candidate
+	if(!target)
+		return
+	var/door_turf = locate(entry_x, entry_y, layout.z_level)
+	if(door_turf)
+		set_turf_and_area(door_turf, /turf/open/floor/asteroidfloor, generator_area)
+		new /obj/machinery/door/airlock/mainship/engineering/free_access(door_turf)
+	var/path_x = entry_x
+	var/path_y = entry_y
+	while(path_x != target.x)
+		path_x += path_x < target.x ? 1 : -1
+		var/turf/path_turf = locate(path_x, path_y, layout.z_level)
+		if(path_turf)
+			set_turf_and_area(path_turf, /turf/open/floor/asteroidfloor, cave_area)
+	while(path_y != target.y)
+		path_y += path_y < target.y ? 1 : -1
+		var/turf/path_turf = locate(path_x, path_y, layout.z_level)
+		if(path_turf)
+			set_turf_and_area(path_turf, /turf/open/floor/asteroidfloor, cave_area)
 
 /obj/effect/landmark/procedural_frontier_generator/proc/place_weed_nodes(list/open_cave_tiles)
 	for(var/turf/cave_turf in open_cave_tiles)
