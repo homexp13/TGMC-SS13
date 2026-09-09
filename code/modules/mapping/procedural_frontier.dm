@@ -211,6 +211,9 @@
 	var/lz_supplycrate_count = 3
 	var/xenomorph_spawn_count = 3
 	var/excavation_site_count = 20
+	// The ground telecomms relay is intentionally sealed inside this square of
+	// indestructible deep rock; it is not intended to be physically reachable.
+	var/telecomms_relay_wall_radius = 1
 	// Selected biome preset is applied once per generation using the round seed.
 	var/selected_biome_name = ""
 	var/selected_weather_trait
@@ -235,6 +238,7 @@
 	var/area/cave_area = new /area/procedural_frontier
 	var/area/landing_area = new /area/procedural_frontier/landing/lz1
 	var/area/generator_area = new /area/procedural_frontier/generator_room
+	var/area/relay_area = new /area/storage/testroom
 
 	generate_terrain(layout, cave_area, landing_area, seed)
 	carve_landing_exit(layout, cave_area, landing_area)
@@ -251,6 +255,9 @@
 	var/list/open_cave_tiles = retain_reachable_cave_tiles(layout, cave_area, landing_area)
 	place_generator_room(layout, generator_area, cave_area, open_cave_tiles, seed)
 	assign_cave_areas(layout)
+	// Place after cave sectors are assigned so their area pass cannot overwrite
+	// the sealed relay chamber.
+	place_ground_telecomms_relay(layout, relay_area, seed)
 	place_weed_nodes(open_cave_tiles)
 	place_xeno_tunnels(open_cave_tiles, layout)
 	var/list/placed_miner_tiles = list()
@@ -832,6 +839,38 @@
 			if(ridge_value > hard_ridge_cutoff || !is_deep_inside_rock(rock_turf, layout))
 				continue
 			set_turf_and_area(rock_turf, deep_cave_wall_type, cave_area)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/place_ground_telecomms_relay(datum/procedural_frontier_layout/layout, area/relay_area, seed)
+	var/list/candidates = list()
+	for(var/tile_x in layout.map_min_x + telecomms_relay_wall_radius + 1 to layout.map_max_x - telecomms_relay_wall_radius - 1)
+		for(var/tile_y in layout.map_min_y + telecomms_relay_wall_radius + 1 to layout.map_max_y - telecomms_relay_wall_radius - 1)
+			if(!is_sealed_relay_location(tile_x, tile_y, layout))
+				continue
+			candidates += list(locate(tile_x, tile_y, layout.z_level))
+	if(!length(candidates))
+		log_game("Procedural Frontier: no sealed rock pocket available for ground telecomms relay")
+		return
+	var/relay_index = 1 + round(procedural_frontier_hash(3701, 43, seed) * (length(candidates) - 1))
+	var/turf/relay_turf = candidates[relay_index]
+	for(var/tile_x in relay_turf.x - telecomms_relay_wall_radius to relay_turf.x + telecomms_relay_wall_radius)
+		for(var/tile_y in relay_turf.y - telecomms_relay_wall_radius to relay_turf.y + telecomms_relay_wall_radius)
+			var/turf/wall_turf = locate(tile_x, tile_y, layout.z_level)
+			if(wall_turf)
+				set_turf_and_area(wall_turf, deep_cave_wall_type, relay_area)
+	// Ground relays are normally embedded in indestructible rock on static
+	// maps. Keep this one fully sealed too: no floor, airlock, or cave opening.
+	relay_turf = locate(relay_turf.x, relay_turf.y, layout.z_level)
+	new /obj/machinery/telecomms/relay/preset/telecomms/ground(relay_turf)
+
+/obj/effect/landmark/procedural_frontier_generator/proc/is_sealed_relay_location(tile_x, tile_y, datum/procedural_frontier_layout/layout)
+	if(layout.is_landing(tile_x, tile_y) || layout.is_generator_room(tile_x, tile_y))
+		return FALSE
+	for(var/check_x in tile_x - telecomms_relay_wall_radius to tile_x + telecomms_relay_wall_radius)
+		for(var/check_y in tile_y - telecomms_relay_wall_radius to tile_y + telecomms_relay_wall_radius)
+			var/turf/check_turf = locate(check_x, check_y, layout.z_level)
+			if(!check_turf || !istype(check_turf, cave_wall_type))
+				return FALSE
+	return TRUE
 
 /obj/effect/landmark/procedural_frontier_generator/proc/is_deep_inside_rock(turf/rock_turf, datum/procedural_frontier_layout/layout)
 	for(var/offset_x in -deep_wall_separation to deep_wall_separation)

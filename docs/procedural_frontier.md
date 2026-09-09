@@ -73,6 +73,14 @@ orientation. A toilet room is created with a one-percent chance. Miner
 placement uses separate near-LZ and remote-cave passes with a configurable
 minimum spacing.
 
+One `/obj/machinery/telecomms/relay/preset/telecomms/ground` is placed in a
+random solid-rock pocket and completely encased in the selected biome's deep
+wall type. It has no entrance or open tile, matching the sealed relay rooms on
+static maps. `telecomms_relay_wall_radius` controls the surrounding wall
+radius. The relay chamber is assigned `/area/storage/testroom` and is placed
+after cave-sector assignment, preventing the generic cave areas from replacing
+its area.
+
 At generation start one of three biome presets is selected from the round seed:
 Jungle (acid rain, smooth rock, dirt floor), Desert (sandstorm, Big Red rock,
 Mars cave floor), or Taiga (snowstorm, Big Red rock, snow layer 2 floor). The
