@@ -275,7 +275,9 @@
 		list("name" = "Desert", "weather" = ZTRAIT_SANDSTORM, "wall" = /turf/closed/mineral/smooth/bigred, "deep_wall" = /turf/closed/mineral/smooth/bigred/indestructible, "floor" = /turf/open/floor/plating/ground/mars/random/cave),
 		list("name" = "Taiga", "weather" = ZTRAIT_SNOWSTORM, "wall" = /turf/closed/mineral/smooth/bluefrostwall, "deep_wall" = /turf/closed/mineral/smooth/darkfrostwall/indestructible, "floor" = /turf/open/floor/plating/ground/snow/layer2)
 	)
-	var/preset_index = 1 + round(procedural_frontier_hash(3601, 41, seed) * (length(presets) - 1))
+	// Use equal-width buckets. `round(hash * (count - 1))` would make the
+	// middle preset twice as likely as the first and last ones.
+	var/preset_index = 1 + floor(procedural_frontier_hash(3601, 41, seed) * length(presets))
 	var/list/preset = presets[preset_index]
 	selected_biome_name = preset["name"]
 	selected_weather_trait = preset["weather"]
