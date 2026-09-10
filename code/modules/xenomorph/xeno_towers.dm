@@ -35,7 +35,7 @@
 	max_integrity = 600
 	xeno_structure_flags = CRITICAL_STRUCTURE|IGNORE_WEED_REMOVAL
 	///Bonus biomass generated per minute by this tower.
-	var/boost_amount = 1
+	var/boost_amount = 0.75
 
 /obj/structure/xeno/mutationtower/Initialize(mapload, _hivenumber)
 	. = ..()
