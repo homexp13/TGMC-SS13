@@ -2233,6 +2233,7 @@
 #include "code\modules\projectiles\particles.dm"
 #include "code\modules\projectiles\projectile.dm"
 #include "code\modules\projectiles\sentries.dm"
+#include "code\modules\projectiles\sentry_wrangler.dm"
 #include "code\modules\projectiles\tracer.dm"
 #include "code\modules\projectiles\ammo_datums\_ammo_datums.dm"
 #include "code\modules\projectiles\ammo_datums\artillery.dm"

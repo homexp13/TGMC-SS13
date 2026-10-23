@@ -803,6 +803,13 @@
 
 ///Wrapper proc to complete the whole firing process.
 /obj/item/weapon/gun/proc/Fire()
+	if(issentry(loc))
+		var/obj/machinery/deployable/mounted/sentry/sentry = loc
+		if(sentry.wrangler && !sentry.wrangler.can_fire_at(target))
+			sentry.wrangler.release_control()
+			return NONE
+		if(world.time < sentry.wrangler_recovery_until)
+			return NONE
 	if(!target || !(gun_user || issentry(loc)) || !(CHECK_BITFIELD(deploy_flags, IS_DEPLOYED) || able_to_fire(gun_user)) || windup_checked == WEAPON_WINDUP_CHECKING)
 		return NONE
 	if(windup_delay && windup_checked == WEAPON_WINDUP_NOT_CHECKED)

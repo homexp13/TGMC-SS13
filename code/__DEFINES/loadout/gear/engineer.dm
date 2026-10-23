@@ -31,6 +31,7 @@ GLOBAL_LIST_INIT(engineer_gear_listed_products, list(
 	/obj/item/tool/pickaxe/plasmacutter = list(CAT_ENGSUP, "Plasma cutter", 18, "blue"),
 	/obj/item/attachable/buildasentry = list(CAT_ENGSUP, "Build-A-Sentry Attachment", 23, "blue"),
 	/obj/item/sentry_upgrade_kit = list(CAT_ENGSUP, "Upgrade kit TUR-B", 17, "blue"),
+	/obj/item/sentry_wrangler = list(CAT_ENGSUP, "Wrangler sentry controller", 10, "blue"),
 	/obj/item/deployable_floodlight = list(CAT_ENGSUP, "Deployable floodlight", 2, "yellow"),
 	/obj/item/weapon/shield/riot/marine/deployable = list(CAT_ENGSUP, "TL-182 deployable shield", 3, "yellow"),
 	/obj/item/binoculars/tactical/range = list(CAT_ENGSUP, "Range Finder", 2, "yellow"),

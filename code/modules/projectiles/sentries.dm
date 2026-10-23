@@ -38,6 +38,9 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 	var/firing
 	///Scan effect sound loop, when the turret is on
 	var/datum/looping_sound/sentry_scan/soundloop
+	///Remote controller, and the shield/AI reboot time after releasing it.
+	var/obj/item/sentry_wrangler/wrangler
+	var/wrangler_recovery_until = 0
 
 //------------------------------------------------------------------
 //Setup and Deletion
@@ -91,10 +94,13 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 
 /obj/machinery/deployable/mounted/sentry/update_overlays()
 	. = ..()
+	if(wrangler || world.time < wrangler_recovery_until)
+		. += image('icons/obj/wrangler.dmi', icon_state = "shield")
 	if(machine_stat & EMPED)
 		. += image('icons/effects/effects.dmi', src, "shieldsparkles")
 
 /obj/machinery/deployable/mounted/sentry/Destroy()
+	wrangler?.release_control()
 	QDEL_NULL(radio)
 	QDEL_NULL(camera)
 	QDEL_NULL(spark_system)
@@ -168,6 +174,9 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 	update_static_data(user)
 
 /obj/machinery/deployable/mounted/sentry/interact(mob/user, manual_mode = FALSE)
+	if(wrangler || world.time < wrangler_recovery_until)
+		to_chat(user, span_warning("Турель управляется дистанционно или перезапускает автоматику."))
+		return TRUE
 	if(!match_iff(user)) //You can't mess with hostile turrets
 		to_chat(user, span_notice("Доступ запрещён."))
 		return
@@ -222,6 +231,8 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 /obj/machinery/deployable/mounted/sentry/ui_act(action, list/params)
 	. = ..()
 	if(.)
+		return
+	if(wrangler || world.time < wrangler_recovery_until)
 		return
 	var/obj/item/weapon/gun/gun = get_internal_item()
 	if(isxeno(usr))
@@ -307,6 +318,7 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 /obj/machinery/deployable/mounted/sentry/proc/knock_down()
 	if(CHECK_BITFIELD(machine_stat, KNOCKED_DOWN))
 		return
+	wrangler?.release_control()
 	sentry_stop_fire()
 	visible_message(span_userdanger("[name] была опрокинута!"))
 	sentry_alert(SENTRY_ALERT_FALLEN)
@@ -317,6 +329,8 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 	update_icon()
 
 /obj/machinery/deployable/mounted/sentry/take_damage(damage_amount, damage_type, damage_flag = null, effects, attack_dir, armour_penetration, mob/living/blame_mob)
+	if(wrangler || world.time < wrangler_recovery_until)
+		damage_amount *= 0.34
 	if(damage_amount <= 0)
 		return
 	if(prob(10))
@@ -334,6 +348,7 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 
 /obj/machinery/deployable/mounted/sentry/emp_act(severity)
 	. = ..()
+	wrangler?.release_control()
 	machine_stat |= EMPED
 	playsound(loc, 'sound/magic/lightningshock.ogg', 50, FALSE)
 	addtimer(CALLBACK(src, PROC_REF(remove_emp)), (5 - severity) * 2 SECONDS, TIMER_UNIQUE|TIMER_OVERRIDE) //will need to add something later to be additive or something
@@ -382,6 +397,13 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 
 /obj/machinery/deployable/mounted/sentry/process()
 	update_icon()
+	if(wrangler)
+		if(!wrangler.valid_control())
+			wrangler.release_control()
+		return
+	if(world.time < wrangler_recovery_until)
+		sentry_stop_fire()
+		return
 	if((machine_stat & EMPED) || !scan())
 		sentry_stop_fire()
 		return
@@ -437,6 +459,8 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 ///Checks the range and the path of the target currently being shot at to see if it is eligable for being shot at again. If not it will stop the firing.
 /obj/machinery/deployable/mounted/sentry/proc/check_next_shot(datum/source, atom/gun_target, obj/item/weapon/gun/gun)
 	SIGNAL_HANDLER
+	if(wrangler)
+		return
 	var/obj/item/weapon/gun/internal_gun = get_internal_item()
 	if(!internal_gun)
 		return
@@ -459,6 +483,8 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 
 ///Sees if theres a target to shoot, then handles firing.
 /obj/machinery/deployable/mounted/sentry/proc/sentry_start_fire()
+	if(wrangler || world.time < wrangler_recovery_until)
+		return
 	if(isclosedturf(loc) || CHECK_BITFIELD(machine_stat, KNOCKED_DOWN))
 		sentry_stop_fire()
 		return
@@ -478,6 +504,8 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 	if(world.time >= (last_fire + 20 SECONDS))
 		playsound(loc, 'sound/items/turrets/turret_fire.ogg', 50, TRUE, 20)
 		sleep(5) //yes, its sleeping a bit before fire
+		if(QDELETED(src) || wrangler || world.time < wrangler_recovery_until)
+			return
 
 	if(CHECK_BITFIELD(gun.turret_flags, TURRET_RADIAL))
 		setDir(get_cardinal_dir(src, target))
@@ -556,6 +584,7 @@ GLOBAL_LIST_INIT(sentry_ignore_List, set_sentry_ignore_List())
 	if(!match_iff(user)) //You can't steal other faction's turrets
 		to_chat(user, span_notice("Доступ запрещён."))
 		return
+	wrangler?.release_control()
 	var/obj/item/weapon/gun/internal_gun = get_internal_item()
 	. = ..()
 	if(!.)

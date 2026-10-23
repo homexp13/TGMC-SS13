@@ -45,13 +45,14 @@
 
 /datum/outfit/quick/tgmc/engineer/sentry
 	name = "Sentry Technician"
-	desc = "Firing more guns than you have hands. Equipped with a AR-12 assault rifle with miniflamer, and two minisentries along with the standard engineer kit. Allows the user to quickly setup strong points and lock areas down, with some sensible placement."
+	desc = "Firing more guns than you have hands. Equipped with a AR-12 assault rifle with miniflamer, two minisentries and a Wrangler remote controller along with the standard engineer kit. The controller provides manual aiming, double fire rate and a protective shield, with a three-second AI reboot after releasing control."
 
 	suit_store = /obj/item/weapon/gun/rifle/ar12/engineer
 	belt = /obj/item/storage/belt/marine/ar12
 
 	backpack_contents = list(
 		/obj/item/weapon/gun/sentry/mini/combat_patrol = 2,
+		/obj/item/sentry_wrangler = 1,
 		/obj/item/ammo_magazine/minisentry = 2,
 		/obj/item/tool/extinguisher/mini = 1,
 		/obj/item/reagent_containers/hypospray/autoinjector/dylovene = 1,
